@@ -1,8 +1,6 @@
 # Clank
 
-Private Discord-to-Pi assistant daemon named after Clank from *Ratchet & Clank*.
-
-Clank lets an allowed Discord user DM or mention the bot, then runs the request through Pi on this VPS. The default runner uses the Pi SDK / `AgentSessionRuntime`; RPC/container/microVM runners are stubbed for future isolation.
+Discord-to-Pi assistant daemon. Clank lets an allowed Discord user DM or mention the bot, then runs the request through Pi on a VPS.
 
 ## Features
 
@@ -10,7 +8,7 @@ Clank lets an allowed Discord user DM or mention the bot, then runs the request 
 - DMs, mentions, and optional allowlisted guild channels
 - Per-job Pi `AgentSessionRuntime`, workspace, and session file
 - Global filesystem allowlist via `CLANK_ALLOWED_ROOTS`; each job also gets a workspace for attachments/scratch
-- Job routing selects ergonomic cwd (`/opt/clank/app` for Clank, `/opt/clank/pi-agent` for Pi resources) without granting extra filesystem access
+- Job routing selects ergonomic cwd (`/<path>/clank/app` for Clank, `/<path>/clank/pi-agent` for Pi resources) without granting extra filesystem access
 - Discord threads for job follow-ups when possible
 - Busy thread messages queue as follow-ups; `steer <msg>` explicitly steers the active turn
 - Streamed preview/status edits and final chunked Discord replies
@@ -20,12 +18,12 @@ Clank lets an allowed Discord user DM or mention the bot, then runs the request 
 
 ## Layout
 
-- Pi agent dir: `/opt/clank/pi-agent`
-- Pi sessions: `/opt/clank/pi-sessions`
-- Workspaces: `/opt/clank/workspaces`
-- Clank repo: `/opt/clank/app`
-- State: `/opt/clank/state/clank-jobs.json`
-- Temp: `/opt/clank/tmp`
+- Pi agent dir: `/<path>/clank/pi-agent`
+- Pi sessions: `/<path>/clank/pi-sessions`
+- Workspaces: `/<path>/clank/workspaces`
+- Clank repo: `/<path>/clank/app`
+- State: `/<path>/clank/state/clank-jobs.json`
+- Temp: `/<path>/clank/tmp`
 - Allowed roots: `CLANK_WORKSPACE_ROOT` plus `CLANK_ALLOWED_ROOTS` (defaults to Clank repo and Pi agent dir when unset)
 
 ## Discord app setup
@@ -45,19 +43,19 @@ Clank lets an allowed Discord user DM or mention the bot, then runs the request 
 ## VPS setup
 
 ```bash
-cd /opt/clank/app
+cd /<path>/clank/app
 npm install
 cp .env.example .env
 $EDITOR .env
 
-mkdir -p /opt/clank/pi-agent /opt/clank/pi-sessions /opt/clank/workspaces /opt/clank/state /opt/clank/tmp
+mkdir -p /<path>/clank/pi-agent /<path>/clank/pi-sessions /<path>/clank/workspaces /<path>/clank/state /<path>/clank/tmp
 npm run build
 npm run start
 ```
 
-Configure Pi credentials/resources in `/opt/clank/pi-agent` (`auth.json`, `settings.json`, `models.json`, `skills/`, `prompts/`, `extensions/`, packages, etc.). Review any Pi packages/extensions/skills before loading them.
+Configure Pi credentials/resources in `/<path>/clank/pi-agent` (`auth.json`, `settings.json`, `models.json`, `skills/`, `prompts/`, `extensions/`, packages, etc.). Review any Pi packages/extensions/skills before loading them.
 
-Set `CLANK_ALLOWED_ROOTS` to the master list of non-workspace directories Clank may inspect or edit, for example `/opt/clank/app,/opt/clank/pi-agent,/data/example-notes,/opt/clank/repos,/opt/clank/worktrees`. Do not allow `/`, `/home`, `/etc`, or broad service-data roots by default.
+Set `CLANK_ALLOWED_ROOTS` to the master list of non-workspace directories Clank may inspect or edit, for example `/<path>/clank/app,/<path>/clank/pi-agent,/data/example-notes,/<path>/clank/repos,/<path>/clank/worktrees`. Do not allow `/`, `/home`, `/etc`, or broad service-data roots by default.
 
 ## Commands
 
@@ -77,8 +75,8 @@ In DMs, mentions, allowed channels, or a job thread:
 
 Requests such as “improve the Discord bridge”, “add commands”, “add guild/role scanning”, “create a Pi skill”, or “build an Obsidian integration” are routed as stricter jobs:
 
-- Clank repo work uses `/opt/clank/app` as cwd when that path is allowed.
-- Pi resource work uses `/opt/clank/pi-agent` as cwd when that path is allowed, but only safe resource subdirs (`skills`, `prompts`, `extensions`, `themes`, `packages`) are writable/readable through path-gated tools.
+- Clank repo work uses `/<path>/clank/app` as cwd when that path is allowed.
+- Pi resource work uses `/<path>/clank/pi-agent` as cwd when that path is allowed, but only safe resource subdirs (`skills`, `prompts`, `extensions`, `themes`, `packages`) are writable/readable through path-gated tools.
 - The safety prompt tells Pi to inspect git status, summarize/diff major changes, and run `npm run check`, `npm test`, and `npm run build` when relevant.
 - Deployment/restart is manual for MVP. `deploy` is only a placeholder response.
 
