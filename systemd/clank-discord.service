@@ -1,0 +1,22 @@
+[Unit]
+Description=Clank Discord-to-Pi assistant
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=clank
+Group=clank
+WorkingDirectory=/opt/clank/app
+EnvironmentFile=/opt/clank/app/.env
+ExecStart=/usr/bin/mise exec -- npm run start
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/clank
+
+[Install]
+WantedBy=multi-user.target
