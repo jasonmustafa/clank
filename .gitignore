@@ -1,0 +1,33 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+auth.json
+hosts.yml
+
+# Local planning/runtime/config state
+.scratch/
+.clank-dev/
+config/clank.config.json
+config/*.local.json
+state/
+tmp/
+logs/
+*.log
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
