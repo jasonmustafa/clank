@@ -4,6 +4,7 @@ import {
   Partials,
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
+  type Message,
 } from "discord.js";
 import {
   canAccessCasual,
@@ -13,6 +14,7 @@ import {
   type DiscordAccessSubject,
   type DiscordPolicy,
 } from "../config/index.js";
+import { handleWorkMessage, type WorkMessageDependencies } from "./work-messages.js";
 
 export const CLANK_COMMAND = new SlashCommandBuilder()
   .setName("clank")
@@ -76,9 +78,28 @@ export function attachInteractionRouter(client: Client, policy: DiscordPolicy): 
   });
 }
 
-export async function startDiscordGateway(discordToken: string, policy: DiscordPolicy): Promise<Client> {
+export function attachWorkMessageRouter(
+  client: Client,
+  policy: DiscordPolicy,
+  dependencies: WorkMessageDependencies,
+): void {
+  client.on("messageCreate", (message) => {
+    if (!message.inGuild() || message.channel.isThread()) return;
+    void handleWorkMessage(policy, toWorkMessage(message), dependencies).catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.error(`Failed to handle work message ${message.id}: ${detail}`);
+    });
+  });
+}
+
+export async function startDiscordGateway(
+  discordToken: string,
+  policy: DiscordPolicy,
+  workMessages?: WorkMessageDependencies,
+): Promise<Client> {
   const client = createDiscordClient();
   attachInteractionRouter(client, policy);
+  if (workMessages !== undefined) attachWorkMessageRouter(client, policy, workMessages);
   await client.login(discordToken);
   return client;
 }
@@ -120,6 +141,30 @@ function help(heading: string, detail: string): CommandResponse {
 
 function denial(): CommandResponse {
   return { allowed: false, content: "You aren't authorized to use Clank here.", ephemeral: true };
+}
+
+function toWorkMessage(message: Message<true>) {
+  return {
+    content: message.content,
+    access: {
+      userId: message.author.id,
+      roleIds: message.member === null ? [] : [...message.member.roles.cache.keys()],
+      guildId: message.guildId,
+      channelId: message.channelId,
+      isBot: message.author.bot,
+      isDm: false,
+    },
+    startThread: async (name: string) => {
+      const thread = await message.startThread({ name });
+      return {
+        id: thread.id,
+        name: thread.name,
+        send: async (content: string) => {
+          await thread.send(content);
+        },
+      };
+    },
+  };
 }
 
 function toCommandRequest(interaction: ChatInputCommandInteraction): CommandRequest {
