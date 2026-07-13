@@ -1,0 +1,4 @@
+# Install pinned tools with: mise install
+# Run project commands with: mise exec -- npm run <script>
+[tools]
+node = "24.18.0"

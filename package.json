@@ -1,0 +1,30 @@
+{
+  "name": "clank",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A private Discord-to-Pi assistant daemon",
+  "type": "module",
+  "engines": {
+    "node": "24.18.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/index.js",
+    "check": "eslint . && tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "register-commands": "tsx src/discord/register-commands.ts"
+  },
+  "overrides": {
+    "esbuild": "0.28.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "@types/node": "24.10.1",
+    "eslint": "9.39.1",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.48.1",
+    "vitest": "4.1.10"
+  }
+}

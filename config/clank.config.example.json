@@ -1,0 +1,24 @@
+{
+  "discord": {
+    "applicationId": "<discord-application-id>",
+    "guildId": "<discord-guild-id>",
+    "ownerUserIds": ["<discord-owner-user-id>"],
+    "workUserIds": ["<discord-work-user-id>"],
+    "workRoleIds": ["<discord-work-role-id>"],
+    "workChannelIds": ["<discord-work-channel-id>"],
+    "elevatedChannelIds": ["<discord-elevated-channel-id>"],
+    "casualGuildIds": ["<discord-casual-guild-id>"]
+  },
+  "github": {
+    "allowedOwners": ["<github-owner>"],
+    "allowedRepositories": ["<github-owner>/<github-repository>"],
+    "commitAuthorName": "<git-author-name>",
+    "commitAuthorEmail": "<git-author-email>"
+  },
+  "paths": {
+    "state": "<absolute-state-directory>",
+    "workspaces": "<absolute-workspaces-directory>",
+    "sessions": "<absolute-sessions-directory>",
+    "temporary": "<absolute-temporary-directory>"
+  }
+}
