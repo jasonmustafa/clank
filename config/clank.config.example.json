@@ -5,6 +5,7 @@
     "ownerUserIds": ["<discord-owner-user-id>"],
     "workUserIds": ["<discord-work-user-id>"],
     "workRoleIds": ["<discord-work-role-id>"],
+    "privilegedApproverUserIds": ["<discord-privileged-approver-user-id>"],
     "workChannelIds": ["<discord-work-channel-id>"],
     "elevatedChannelIds": ["<discord-elevated-channel-id>"],
     "casualGuildIds": ["<discord-casual-guild-id>"]
