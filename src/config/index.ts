@@ -51,6 +51,16 @@ export interface PathPolicy {
   workspaces: string;
   sessions: string;
   temporary: string;
+  resources: string;
+}
+
+export interface ResourceSource {
+  id: string;
+  repo: string;
+  ref: string;
+  skills: string[];
+  prompts: string[];
+  extensions: string[];
 }
 
 export interface ClankPolicy {
@@ -58,6 +68,7 @@ export interface ClankPolicy {
   github: GithubPolicy;
   paths: PathPolicy;
   workspaces: WorkspaceRegistryEntry[];
+  resources: ResourceSource[];
 }
 
 export interface RuntimeConfig {
@@ -257,9 +268,43 @@ function validatePolicy(value: unknown, issues: string[]): ClankPolicy | undefin
     workspaces: absolutePath(pathsValue.workspaces, "paths.workspaces", issues),
     sessions: absolutePath(pathsValue.sessions, "paths.sessions", issues),
     temporary: absolutePath(pathsValue.temporary, "paths.temporary", issues),
+    resources: pathsValue.resources === undefined
+      ? join(absolutePath(pathsValue.state, "paths.state", issues), "resources")
+      : absolutePath(pathsValue.resources, "paths.resources", issues),
   };
   const workspaces = workspaceEntries(root.workspaces, issues);
-  return { discord, github, paths, workspaces };
+  const resources = resourceEntries(root.resources, issues);
+  return { discord, github, paths, workspaces, resources };
+}
+
+function resourceEntries(value: unknown, issues: string[]): ResourceSource[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) { issues.push("resources must be an array"); return []; }
+  const ids = new Set<string>();
+  return value.map((item, index) => {
+    const path = `resources[${String(index)}]`;
+    const entry = record(item, path, issues);
+    if (entry === undefined) return { id: "", repo: "", ref: "", skills: [], prompts: [], extensions: [] };
+    const id = stringValue(entry.id, `${path}.id`, issues);
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/u.test(id)) issues.push(`${path}.id must be a safe path segment`);
+    if (ids.has(id)) issues.push(`${path}.id must be unique`); else ids.add(id);
+    return {
+      id,
+      repo: stringValue(entry.repo, `${path}.repo`, issues),
+      ref: stringValue(entry.ref, `${path}.ref`, issues),
+      skills: resourcePatterns(entry.skills, `${path}.skills`, issues),
+      prompts: resourcePatterns(entry.prompts, `${path}.prompts`, issues),
+      extensions: resourcePatterns(entry.extensions, `${path}.extensions`, issues),
+    };
+  });
+}
+
+function resourcePatterns(value: unknown, path: string, issues: string[]): string[] {
+  const patterns = optionalStringArray(value, path, issues);
+  patterns.forEach((pattern, index) => {
+    if (isAbsolute(pattern) || pattern.split(/[\\/]/u).includes("..")) issues.push(`${path}[${String(index)}] must stay within its source checkout`);
+  });
+  return patterns;
 }
 
 function workspaceEntries(value: unknown, issues: string[]): WorkspaceRegistryEntry[] {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FakePiRunner, jobSessionDir, RpcPiRunner, type PiRunnerEvent } from "./index.js";
+import { FakePiRunner, jobSessionDir, resourceLoaderPaths, RpcPiRunner, type PiRunnerEvent } from "./index.js";
 
 describe("FakePiRunner", () => {
   it("implements the runner lifecycle and emits streamed and final events", async () => {
@@ -20,6 +20,19 @@ describe("FakePiRunner", () => {
     unsubscribe();
     await runner.dispose();
     expect(runner.status().state).toBe("disposed");
+  });
+});
+
+describe("trusted runner resources", () => {
+  it("snapshots each resource category for a newly created runner", () => {
+    const configured = { skills: ["/repo/skill"], prompts: ["/repo/prompt.md"], extensions: ["/repo/ext.ts"] };
+    const paths = resourceLoaderPaths(configured);
+    configured.skills.push("/repo/later");
+    expect(paths).toEqual({
+      additionalSkillPaths: ["/repo/skill"],
+      additionalPromptTemplatePaths: ["/repo/prompt.md"],
+      additionalExtensionPaths: ["/repo/ext.ts"],
+    });
   });
 });
 

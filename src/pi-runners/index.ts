@@ -15,6 +15,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { chunkDiscordMessage } from "../formatting/index.js";
 import { createSafetyExtension, type SafetyExtensionOptions } from "../safety/index.js";
+import type { ResolvedResources } from "../resources/index.js";
 
 export type RunnerState = "idle" | "running" | "compacting" | "disposed";
 export interface PiRunnerStatus { state: RunnerState; sessionId: string; model: string; }
@@ -106,6 +107,7 @@ export interface SdkPiRunnerOptions {
   model: { provider: string; id: string };
   thinkingLevel: ThinkingLevel;
   trustedResourcePaths?: readonly string[];
+  trustedResources?: Readonly<ResolvedResources>;
   previewIntervalMs?: number;
   messageLimit?: number;
   customTools?: ToolDefinition[];
@@ -157,14 +159,15 @@ export class SdkPiRunner extends EventedRunner implements PiRunner {
         },
       });
       const trustedPaths = [...(options.trustedResourcePaths ?? [])];
+      const categorizedPaths = resourceLoaderPaths(options.trustedResources ?? { skills: [], prompts: [], extensions: [] });
       // Discover from the trusted agent directory, never from the arbitrary job cwd.
       const resourceLoader = new DefaultResourceLoader({
         cwd: options.agentDir,
         agentDir: options.agentDir,
         settingsManager: services.settingsManager,
-        additionalExtensionPaths: trustedPaths,
-        additionalSkillPaths: trustedPaths,
-        additionalPromptTemplatePaths: trustedPaths,
+        additionalExtensionPaths: [...trustedPaths, ...categorizedPaths.additionalExtensionPaths],
+        additionalSkillPaths: [...trustedPaths, ...categorizedPaths.additionalSkillPaths],
+        additionalPromptTemplatePaths: [...trustedPaths, ...categorizedPaths.additionalPromptTemplatePaths],
         additionalThemePaths: trustedPaths,
         extensionFactories: [createSafetyExtension(options.safety)],
       });
@@ -266,6 +269,14 @@ export class SdkPiRunner extends EventedRunner implements PiRunner {
     if (this.#state === "disposed") throw new Error("SdkPiRunner is disposed");
     if (this.#state !== "idle") throw new Error(`SdkPiRunner is ${this.#state}`);
   }
+}
+
+export function resourceLoaderPaths(resources: Readonly<ResolvedResources>) {
+  return {
+    additionalSkillPaths: [...resources.skills],
+    additionalPromptTemplatePaths: [...resources.prompts],
+    additionalExtensionPaths: [...resources.extensions],
+  };
 }
 
 export function jobSessionDir(sessionsDir: string, jobId: string): string {

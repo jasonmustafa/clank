@@ -40,7 +40,18 @@ const policy = {
     workspaces: "/srv/clank/workspaces",
     sessions: "/srv/clank/sessions",
     temporary: "/srv/clank/tmp",
+    resources: "/srv/clank/resources",
   },
+  resources: [
+    {
+      id: "trusted-tools",
+      repo: "https://github.com/example/resources.git",
+      ref: "v1.2.3",
+      skills: ["skills/*/SKILL.md"],
+      prompts: ["prompts/review.md"],
+      extensions: ["extensions/*.ts"],
+    },
+  ],
 };
 
 async function policyFile(value: unknown = policy): Promise<string> {
@@ -76,6 +87,8 @@ describe("loadConfig", () => {
     expect(config.secrets).toEqual({ discordToken: "discord-secret", githubToken: "github-secret" });
     expect(config.policy.discord.applicationId).toBe("app");
     expect(config.policy.workspaces[0]?.repository).toBe("octo/repo");
+    expect(config.policy.resources[0]).toEqual(policy.resources[0]);
+    expect(config.policy.paths.resources).toBe("/srv/clank/resources");
     expect(env.CLANK_DISCORD_TOKEN).toBeUndefined();
     expect(env.CLANK_GITHUB_TOKEN).toBeUndefined();
   });
@@ -101,6 +114,12 @@ describe("loadConfig", () => {
     const config = await loadConfig({ env: { CLANK_CONFIG_PATH: path }, cwd: "/unused", envPath });
 
     expect(config.secrets).toEqual({ discordToken: "file-discord", githubToken: "file-github" });
+  });
+
+  it("rejects resource patterns that escape their checkout", async () => {
+    const path = await policyFile({ ...policy, resources: [{ ...policy.resources[0], skills: ["../secret/SKILL.md"] }] });
+    await expect(loadConfig({ env: { CLANK_CONFIG_PATH: path, CLANK_DISCORD_TOKEN: "d", CLANK_GITHUB_TOKEN: "g" } }))
+      .rejects.toThrow("resources[0].skills[0]");
   });
 
   it("reports actionable paths without exposing secret values", async () => {

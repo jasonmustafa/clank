@@ -51,7 +51,7 @@ describe("/clank command", () => {
   it("declares a guild command with a help subcommand", () => {
     const command = CLANK_COMMAND.toJSON();
     expect(command.name).toBe("clank");
-    expect(command.options?.map((option) => option.name)).toEqual(["help", "stop", "steer", "compact", "status", "jobs", "new"]);
+    expect(command.options?.map((option) => option.name)).toEqual(["help", "stop", "steer", "compact", "status", "jobs", "new", "resources-update"]);
   });
 
   it.each([

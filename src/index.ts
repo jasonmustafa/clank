@@ -10,6 +10,7 @@ import { WorkspaceRegistry } from "./workspaces/index.js";
 import { ApprovalService } from "./safety/index.js";
 import { attachApprovalInteractionRouter, DiscordApprovalMessenger } from "./safety/discord.js";
 import { createSystemRequestService, GithubHelperClient, SystemHelperClient } from "./helpers/index.js";
+import { ResourceUpdater } from "./resources/index.js";
 
 export const serviceName = "clank";
 
@@ -57,6 +58,10 @@ async function main(): Promise<void> {
   const ingestor = new AttachmentIngestor({ temporaryRoot: config.policy.paths.temporary });
   const controller = new JobController(jobs.list(), runnerFor, undefined, async (job) => jobs.update(job), (job) => queueFor(job).take());
   const casual = new CasualController(config.policy.discord, new SdkCasualRunner("/srv/clank/pi-agent"));
+  const resourceUpdater = new ResourceUpdater({
+    checkoutRoot: config.policy.paths.resources,
+    statePath: join(config.policy.paths.state, "resource-refs.json"),
+  });
   const client = await startDiscordGateway(config.secrets.discordToken, config.policy.discord, {
     jobs,
     runner: new FakeRunner(),
@@ -67,7 +72,7 @@ async function main(): Promise<void> {
     attachmentIngestor: ingestor,
     takeAttachments: (job) => queueFor(job).take(),
     prepareWorkspace: async (jobId, request) => (await workspaces.prepare(workspaces.requestFrom(request), jobId)).path,
-  }, controller, { ingestor }, casual);
+  }, controller, { ingestor }, casual, { updater: resourceUpdater, sources: config.policy.resources });
   const approvals = await ApprovalService.open({
     directory: config.policy.paths.state,
     messenger: new DiscordApprovalMessenger(client),

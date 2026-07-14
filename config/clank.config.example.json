@@ -33,10 +33,21 @@
       "canonicalPath": "<absolute-read-only-canonical-path>"
     }
   ],
+  "resources": [
+    {
+      "id": "<trusted-resource-name>",
+      "repo": "https://github.com/<owner>/<resource-repository>.git",
+      "ref": "<pinned-tag-branch-or-commit>",
+      "skills": ["skills/*/SKILL.md"],
+      "prompts": ["prompts/*.md"],
+      "extensions": ["extensions/*.ts"]
+    }
+  ],
   "paths": {
     "state": "<absolute-state-directory>",
     "workspaces": "<absolute-workspaces-directory>",
     "sessions": "<absolute-sessions-directory>",
-    "temporary": "<absolute-temporary-directory>"
+    "temporary": "<absolute-temporary-directory>",
+    "resources": "<absolute-trusted-resource-checkout-directory>"
   }
 }

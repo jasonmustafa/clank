@@ -19,6 +19,8 @@ import { handleWorkMessage, type WorkMessageDependencies } from "./work-messages
 import { type JobControl, type JobController } from "../jobs/routing.js";
 import { AttachmentIngestor, type DiscordAttachment } from "../attachments/index.js";
 import { CasualController } from "./casual.js";
+import { handleResourcesUpdate, type ResourceUpdateHandler } from "./resources-update.js";
+import type { ResourceSource } from "../config/index.js";
 
 export const CLANK_COMMAND = new SlashCommandBuilder()
   .setName("clank")
@@ -29,7 +31,8 @@ export const CLANK_COMMAND = new SlashCommandBuilder()
   .addSubcommand((command) => command.setName("compact").setDescription("Compact an idle job"))
   .addSubcommand((command) => command.setName("status").setDescription("Show the current job status"))
   .addSubcommand((command) => command.setName("jobs").setDescription("List your jobs"))
-  .addSubcommand((command) => command.setName("new").setDescription("Start a new session"));
+  .addSubcommand((command) => command.setName("new").setDescription("Start a new session"))
+  .addSubcommand((command) => command.setName("resources-update").setDescription("Update trusted Pi resources").addBooleanOption((option) => option.setName("confirm").setDescription("Confirm extension/package code changes")));
 
 export type ChannelKind = "guild" | "thread" | "dm";
 
@@ -80,11 +83,19 @@ export function routeCommand(policy: DiscordPolicy, request: CommandRequest): Co
   };
 }
 
-export function attachInteractionRouter(client: Client, policy: DiscordPolicy, jobs?: JobController): void {
+export interface ResourceUpdateDependencies { updater: ResourceUpdateHandler; sources: readonly ResourceSource[]; }
+
+export function attachInteractionRouter(client: Client, policy: DiscordPolicy, jobs?: JobController, resources?: ResourceUpdateDependencies): void {
   client.on("interactionCreate", (interaction) => {
     if (!interaction.isChatInputCommand()) return;
     const request = toCommandRequest(interaction);
     const control = request.subcommand as JobControl;
+    if (request.subcommand === "resources-update" && resources !== undefined) {
+      void handleResourcesUpdate(policy, request.userId, interaction.options.getBoolean("confirm") ?? false, resources.updater, resources.sources)
+        .then(async (response) => interaction.reply({ content: response.content, ephemeral: true }))
+        .catch(async (error: unknown) => interaction.reply({ content: `Resource update failed: ${error instanceof Error ? error.message : String(error)}`, ephemeral: true }));
+      return;
+    }
     if (jobs !== undefined && isJobControl(control) && canAccessWork(policy, accessSubject(request))) {
       const argument = control === "steer" ? interaction.options.getString("instructions") ?? undefined : undefined;
       void jobs.command(control, { channelKind: request.channelKind === "dm" ? "dm" : "thread", channelId: request.channelId, userId: request.userId }, argument)
@@ -180,9 +191,10 @@ export async function startDiscordGateway(
   jobs?: JobController,
   attachments?: JobAttachmentDependencies,
   casual?: CasualController,
+  resources?: ResourceUpdateDependencies,
 ): Promise<Client> {
   const client = createDiscordClient();
-  attachInteractionRouter(client, policy, jobs);
+  attachInteractionRouter(client, policy, jobs, resources);
   if (workMessages !== undefined) attachWorkMessageRouter(client, policy, workMessages);
   if (jobs !== undefined) attachJobMessageRouter(client, policy, jobs, attachments);
   if (casual !== undefined) attachCasualMessageRouter(client, casual);
