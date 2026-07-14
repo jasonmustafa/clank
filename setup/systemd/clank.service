@@ -1,0 +1,25 @@
+[Unit]
+Description=Clank Discord-to-Pi daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=clank
+Group=clank
+WorkingDirectory=/srv/clank/app
+Environment=HOME=/srv/clank
+Environment=CLANK_CONFIG_PATH=/srv/clank/config/clank.config.json
+EnvironmentFile=/etc/clank/clank.env
+ExecStart=/srv/clank/app/setup/systemd/run-clank
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/srv/clank/state /srv/clank/workspaces /srv/clank/pi-sessions /srv/clank/tmp /srv/clank/resources /srv/clank/logs
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target
