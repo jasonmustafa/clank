@@ -5,6 +5,7 @@ import { JobController } from "./jobs/routing.js";
 import { FakeRunner } from "./pi-runners/index.js";
 import { AttachmentIngestor, DiscordAttachmentQueue, createDiscordAttachTool } from "./attachments/index.js";
 import { join } from "node:path";
+import { CasualController, SdkCasualRunner } from "./discord/casual.js";
 
 export const serviceName = "clank";
 
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
   };
   const ingestor = new AttachmentIngestor({ temporaryRoot: config.policy.paths.temporary });
   const controller = new JobController(jobs.list(), runnerFor, undefined, async (job) => jobs.update(job), (job) => queueFor(job).take());
+  const casual = new CasualController(config.policy.discord, new SdkCasualRunner("/srv/clank/pi-agent"));
   const client = await startDiscordGateway(config.secrets.discordToken, config.policy.discord, {
     jobs,
     runner: new FakeRunner(),
@@ -40,7 +42,7 @@ async function main(): Promise<void> {
     onJobCreated: (job) => { controller.add(job); },
     attachmentIngestor: ingestor,
     takeAttachments: (job) => queueFor(job).take(),
-  }, controller, { ingestor });
+  }, controller, { ingestor }, casual);
   console.log(`${serviceName} connected as ${client.user?.tag ?? "unknown user"}`);
 }
 

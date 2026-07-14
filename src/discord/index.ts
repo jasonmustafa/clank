@@ -18,6 +18,7 @@ import {
 import { handleWorkMessage, type WorkMessageDependencies } from "./work-messages.js";
 import { type JobControl, type JobController } from "../jobs/routing.js";
 import { AttachmentIngestor, type DiscordAttachment } from "../attachments/index.js";
+import { CasualController } from "./casual.js";
 
 export const CLANK_COMMAND = new SlashCommandBuilder()
   .setName("clank")
@@ -110,6 +111,34 @@ export function attachWorkMessageRouter(
   });
 }
 
+export function attachCasualMessageRouter(client: Client, casual: CasualController): void {
+  client.on("messageCreate", (message) => {
+    if (!message.inGuild() || message.author.bot || message.channel.isThread()) return;
+    const botId = client.user?.id;
+    if (botId === undefined) return;
+    const mentionsClank = message.mentions.users.has(botId);
+    const replyToMessageId = message.reference?.messageId ?? null;
+    if (!casual.shouldConsider({ authorIsBot: false, authorId: message.author.id, guildId: message.guildId, channelId: message.channelId, mentionsClank, replyToMessageId })) return;
+    void (async () => {
+      const fetched = await message.channel.messages.fetch({ limit: 100, before: message.id });
+      const recentMessages = [...fetched.values()].sort((a, b) => a.createdTimestamp - b.createdTimestamp).map((item) => ({
+        id: item.id, authorId: item.author.id, authorName: item.member?.displayName ?? item.author.displayName,
+        authorIsBot: item.author.bot, content: item.content,
+      }));
+      const result = await casual.handle({
+        id: message.id, authorId: message.author.id, authorName: message.member?.displayName ?? message.author.displayName,
+        authorIsBot: false, guildId: message.guildId, channelId: message.channelId, content: message.content,
+        mentionsClank, replyToMessageId, recentMessages,
+      }, botId);
+      if (result.kind === "ignored") return;
+      const reply = await message.reply(result.content);
+      if (result.kind === "reply") casual.recordReply(result.continuationId, reply.id);
+    })().catch((error: unknown) => {
+      console.error(`Failed to route casual message ${message.id}: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  });
+}
+
 export interface JobAttachmentDependencies { ingestor: AttachmentIngestor; }
 
 export function attachJobMessageRouter(client: Client, policy: DiscordPolicy, jobs: JobController, attachments?: JobAttachmentDependencies): void {
@@ -150,11 +179,13 @@ export async function startDiscordGateway(
   workMessages?: WorkMessageDependencies,
   jobs?: JobController,
   attachments?: JobAttachmentDependencies,
+  casual?: CasualController,
 ): Promise<Client> {
   const client = createDiscordClient();
   attachInteractionRouter(client, policy, jobs);
   if (workMessages !== undefined) attachWorkMessageRouter(client, policy, workMessages);
   if (jobs !== undefined) attachJobMessageRouter(client, policy, jobs, attachments);
+  if (casual !== undefined) attachCasualMessageRouter(client, casual);
   await client.login(discordToken);
   return client;
 }

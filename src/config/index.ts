@@ -16,6 +16,16 @@ export interface DiscordPolicy {
   workChannelIds: string[];
   elevatedChannelIds: string[];
   casualGuildIds: string[];
+  casualDeniedChannelIds?: string[];
+  casualContextMessages?: number;
+  casualContinuationTtlMs?: number;
+  casualUserRateLimit?: RateLimitPolicy;
+  casualGuildRateLimit?: RateLimitPolicy;
+}
+
+export interface RateLimitPolicy {
+  requests: number;
+  windowMs: number;
 }
 
 export interface GithubPolicy {
@@ -206,6 +216,11 @@ function validatePolicy(value: unknown, issues: string[]): ClankPolicy | undefin
     workChannelIds: stringArray(discordValue.workChannelIds, "discord.workChannelIds", issues),
     elevatedChannelIds: stringArray(discordValue.elevatedChannelIds, "discord.elevatedChannelIds", issues),
     casualGuildIds: stringArray(discordValue.casualGuildIds, "discord.casualGuildIds", issues),
+    casualDeniedChannelIds: optionalStringArray(discordValue.casualDeniedChannelIds, "discord.casualDeniedChannelIds", issues),
+    casualContextMessages: optionalPositiveInteger(discordValue.casualContextMessages, "discord.casualContextMessages", 5, issues),
+    casualContinuationTtlMs: optionalPositiveInteger(discordValue.casualContinuationTtlMs, "discord.casualContinuationTtlMs", 300_000, issues),
+    casualUserRateLimit: optionalRateLimit(discordValue.casualUserRateLimit, "discord.casualUserRateLimit", { requests: 5, windowMs: 60_000 }, issues),
+    casualGuildRateLimit: optionalRateLimit(discordValue.casualGuildRateLimit, "discord.casualGuildRateLimit", { requests: 20, windowMs: 60_000 }, issues),
   };
   const github: GithubPolicy = {
     allowedOwners: stringArray(githubValue.allowedOwners, "github.allowedOwners", issues),
@@ -248,6 +263,22 @@ function stringArray(value: unknown, path: string, issues: string[]): string[] {
 
 function optionalStringArray(value: unknown, path: string, issues: string[]): string[] {
   return value === undefined ? [] : stringArray(value, path, issues);
+}
+
+function optionalPositiveInteger(value: unknown, path: string, fallback: number, issues: string[]): number {
+  if (value === undefined) return fallback;
+  if (!Number.isInteger(value) || (value as number) <= 0) { issues.push(`${path} must be a positive integer`); return fallback; }
+  return value as number;
+}
+
+function optionalRateLimit(value: unknown, path: string, fallback: RateLimitPolicy, issues: string[]): RateLimitPolicy {
+  if (value === undefined) return fallback;
+  const item = record(value, path, issues);
+  if (item === undefined) return fallback;
+  return {
+    requests: optionalPositiveInteger(item.requests, `${path}.requests`, fallback.requests, issues),
+    windowMs: optionalPositiveInteger(item.windowMs, `${path}.windowMs`, fallback.windowMs, issues),
+  };
 }
 
 function absolutePath(value: unknown, path: string, issues: string[]): string {

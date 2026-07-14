@@ -8,7 +8,12 @@
     "privilegedApproverUserIds": ["<discord-privileged-approver-user-id>"],
     "workChannelIds": ["<discord-work-channel-id>"],
     "elevatedChannelIds": ["<discord-elevated-channel-id>"],
-    "casualGuildIds": ["<discord-casual-guild-id>"]
+    "casualGuildIds": ["<discord-casual-guild-id>"],
+    "casualDeniedChannelIds": ["<discord-casual-denied-channel-id>"],
+    "casualContextMessages": 5,
+    "casualContinuationTtlMs": 300000,
+    "casualUserRateLimit": { "requests": 5, "windowMs": 60000 },
+    "casualGuildRateLimit": { "requests": 20, "windowMs": 60000 }
   },
   "github": {
     "allowedOwners": ["<github-owner>"],
