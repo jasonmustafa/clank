@@ -49,10 +49,9 @@ describe("Discord gateway", () => {
 
 describe("/clank command", () => {
   it("declares a guild command with a help subcommand", () => {
-    expect(CLANK_COMMAND.toJSON()).toMatchObject({
-      name: "clank",
-      options: [{ name: "help", type: 1 }],
-    });
+    const command = CLANK_COMMAND.toJSON();
+    expect(command.name).toBe("clank");
+    expect(command.options?.map((option) => option.name)).toEqual(["help", "stop", "steer", "compact", "status", "jobs", "new"]);
   });
 
   it.each([

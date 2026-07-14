@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-export type JobStatus = "running" | "completed" | "failed" | "interrupted";
+export type JobStatus = "running" | "completed" | "failed" | "interrupted" | "stopped";
 
 export interface Job {
   id: string;
@@ -103,11 +103,17 @@ export class JobManager {
   }
 
   async setStatus(id: string, status: JobStatus): Promise<void> {
+    const existing = this.#jobs.get(id);
+    if (existing === undefined) throw new Error(`Job ${id} does not exist`);
+    await this.update({ ...existing, status, updatedAt: this.now().toISOString() });
+  }
+
+  async update(job: Job): Promise<void> {
     await this.enqueue(async () => {
-      const existing = this.#jobs.get(id);
-      if (existing === undefined) throw new Error(`Job ${id} does not exist`);
-      this.#jobs.set(id, { ...existing, status, updatedAt: this.now().toISOString() });
-      await this.persist(() => this.#jobs.set(id, existing));
+      const existing = this.#jobs.get(job.id);
+      if (existing === undefined) throw new Error(`Job ${job.id} does not exist`);
+      this.#jobs.set(job.id, job);
+      await this.persist(() => this.#jobs.set(job.id, existing));
     });
   }
 

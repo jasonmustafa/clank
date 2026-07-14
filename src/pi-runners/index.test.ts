@@ -8,7 +8,7 @@ describe("FakePiRunner", () => {
     const unsubscribe = runner.onEvent((event) => { events.push(event); });
 
     await expect(runner.prompt("do it")).resolves.toEqual(["Working"]);
-    expect(runner.status()).toEqual({ state: "idle", sessionId: "fake-session-1" });
+    expect(runner.status()).toEqual({ state: "idle", sessionId: "fake-session-1", model: "fake/model" });
     expect(events.map((event) => event.type)).toEqual([
       "status", "text_delta", "text_delta", "final", "status",
     ]);

@@ -18,10 +18,12 @@ export interface WorkMessage {
 export interface WorkMessageDependencies {
   jobs: JobManager;
   runner: FakeRunner;
+  runnerForJob?: (job: Job) => FakeRunner;
   workspaceRoot: string;
   sessionRoot: string;
   createJobId?: () => string;
   now?: () => Date;
+  onJobCreated?: (job: Job) => void;
 }
 
 export type WorkMessageResult = { handled: false } | { handled: true; jobId: string };
@@ -52,9 +54,11 @@ export async function handleWorkMessage(
     updatedAt: timestamp,
   };
   await dependencies.jobs.create(job);
+  dependencies.onJobCreated?.(job);
 
   try {
-    const final = await dependencies.runner.run(message.content, async (text) => thread.send(text));
+    const runner = dependencies.runnerForJob?.(job) ?? dependencies.runner;
+    const final = await runner.run(message.content, async (text) => thread.send(text));
     await thread.send(final);
     await dependencies.jobs.setStatus(id, "completed");
   } catch (error) {

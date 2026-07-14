@@ -14,7 +14,7 @@ import {
 import { chunkDiscordMessage } from "../formatting/index.js";
 
 export type RunnerState = "idle" | "running" | "compacting" | "disposed";
-export interface PiRunnerStatus { state: RunnerState; sessionId: string; }
+export interface PiRunnerStatus { state: RunnerState; sessionId: string; model: string; }
 export type PiRunnerEvent =
   | { type: "text_delta"; text: string }
   | { type: "preview"; text: string }
@@ -24,6 +24,10 @@ export type PiRunnerListener = (event: PiRunnerEvent) => void | Promise<void>;
 
 export interface PiRunner {
   prompt(prompt: string): Promise<readonly string[]>;
+  followUp(prompt: string): Promise<void>;
+  steer(prompt: string): Promise<void>;
+  clearQueues(): void;
+  queueSize(): number;
   abort(): Promise<void>;
   compact(instructions?: string): Promise<void>;
   newSession(): Promise<void>;
@@ -49,14 +53,16 @@ export class FakePiRunner extends EventedRunner implements PiRunner {
   readonly #final: string;
   #state: RunnerState = "idle";
   #sessionNumber = 1;
+  #queuedMessages = 0;
+  readonly received: { text: string; behavior: "prompt" | "followUp" | "steer" }[] = [];
   constructor(options: FakeRunnerOptions = {}) {
     super();
     this.#chunks = options.chunks ?? ["Clank is working..."];
     this.#final = options.final ?? "Fake runner completed the job.";
   }
-  status(): PiRunnerStatus { return { state: this.#state, sessionId: `fake-session-${String(this.#sessionNumber)}` }; }
+  status(): PiRunnerStatus { return { state: this.#state, sessionId: `fake-session-${String(this.#sessionNumber)}`, model: "fake/model" }; }
   async prompt(prompt: string): Promise<readonly string[]> {
-    void prompt;
+    this.received.push({ text: prompt, behavior: "prompt" });
     this.#state = "running";
     await this.emit({ type: "status", status: this.status() });
     for (const text of this.#chunks) await this.emit({ type: "text_delta", text });
@@ -66,6 +72,11 @@ export class FakePiRunner extends EventedRunner implements PiRunner {
     await this.emit({ type: "status", status: this.status() });
     return messages;
   }
+  followUp(text: string): Promise<void> { this.received.push({ text, behavior: "followUp" }); this.#queuedMessages += 1; return Promise.resolve(); }
+  steer(text: string): Promise<void> { this.received.push({ text, behavior: "steer" }); this.#queuedMessages += 1; return Promise.resolve(); }
+  clearQueues(): void { this.#queuedMessages = 0; }
+  queueSize(): number { return this.#queuedMessages; }
+  setState(state: RunnerState): void { this.#state = state; }
   abort(): Promise<void> { this.#state = "idle"; return Promise.resolve(); }
   compact(): Promise<void> { this.#state = "idle"; return Promise.resolve(); }
   newSession(): Promise<void> { this.#sessionNumber += 1; return Promise.resolve(); }
@@ -104,10 +115,13 @@ export class SdkPiRunner extends EventedRunner implements PiRunner {
   #lastPreviewAt = 0;
   #lastPreviewText = "";
   #eventQueue: Promise<void> = Promise.resolve();
+  #queuedMessages = 0;
+  readonly #model: string;
 
   private constructor(runtime: AgentSessionRuntime, options: SdkPiRunnerOptions) {
     super();
     this.#runtime = runtime;
+    this.#model = `${options.model.provider}/${options.model.id}`;
     this.#previewIntervalMs = options.previewIntervalMs ?? 1_000;
     this.#messageLimit = options.messageLimit ?? 1_900;
     this.#subscribe();
@@ -162,7 +176,7 @@ export class SdkPiRunner extends EventedRunner implements PiRunner {
     return new SdkPiRunner(runtime, options);
   }
 
-  status(): PiRunnerStatus { return { state: this.#state, sessionId: this.#runtime.session.sessionId }; }
+  status(): PiRunnerStatus { return { state: this.#state, sessionId: this.#runtime.session.sessionId, model: this.#model }; }
   async prompt(prompt: string): Promise<readonly string[]> {
     this.#assertIdle();
     this.#text = "";
@@ -181,6 +195,14 @@ export class SdkPiRunner extends EventedRunner implements PiRunner {
       await this.#setState("idle");
     }
   }
+  async followUp(text: string): Promise<void> { await this.#runtime.session.prompt(text, { streamingBehavior: "followUp" }); }
+  async steer(text: string): Promise<void> { await this.#runtime.session.prompt(text, { streamingBehavior: "steer" }); }
+  clearQueues(): void {
+    this.#runtime.session.agent.clearSteeringQueue();
+    this.#runtime.session.agent.clearFollowUpQueue();
+    this.#queuedMessages = 0;
+  }
+  queueSize(): number { return this.#queuedMessages; }
   async abort(): Promise<void> { await this.#runtime.session.abort(); await this.#setState("idle"); }
   async compact(instructions?: string): Promise<void> {
     this.#assertIdle();
@@ -209,6 +231,10 @@ export class SdkPiRunner extends EventedRunner implements PiRunner {
   }
   #subscribe(): void {
     this.#unsubscribe = this.#runtime.session.subscribe((event) => {
+      if (event.type === "queue_update") {
+        this.#queuedMessages = event.steering.length + event.followUp.length;
+        return;
+      }
       if (event.type !== "message_update" || event.assistantMessageEvent.type !== "text_delta") return;
       const text = event.assistantMessageEvent.delta;
       this.#text += text;
@@ -245,8 +271,12 @@ export function jobSessionDir(sessionsDir: string, jobId: string): string {
 }
 
 export class RpcPiRunner extends EventedRunner implements PiRunner {
-  status(): PiRunnerStatus { return { state: "idle", sessionId: "rpc-not-implemented" }; }
+  status(): PiRunnerStatus { return { state: "idle", sessionId: "rpc-not-implemented", model: "rpc/not-implemented" }; }
   prompt(prompt: string): Promise<readonly string[]> { void prompt; return Promise.reject(new Error("RpcPiRunner is not implemented")); }
+  followUp(prompt: string): Promise<void> { void prompt; return Promise.reject(new Error("RpcPiRunner is not implemented")); }
+  steer(prompt: string): Promise<void> { void prompt; return Promise.reject(new Error("RpcPiRunner is not implemented")); }
+  clearQueues(): void { throw new Error("RpcPiRunner is not implemented"); }
+  queueSize(): number { return 0; }
   abort(): Promise<void> { return Promise.reject(new Error("RpcPiRunner is not implemented")); }
   compact(): Promise<void> { return Promise.reject(new Error("RpcPiRunner is not implemented")); }
   newSession(): Promise<void> { return Promise.reject(new Error("RpcPiRunner is not implemented")); }

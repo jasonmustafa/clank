@@ -15,11 +15,18 @@ import {
   type DiscordPolicy,
 } from "../config/index.js";
 import { handleWorkMessage, type WorkMessageDependencies } from "./work-messages.js";
+import { type JobControl, type JobController } from "../jobs/routing.js";
 
 export const CLANK_COMMAND = new SlashCommandBuilder()
   .setName("clank")
   .setDescription("Control Clank and get context-aware help")
-  .addSubcommand((command) => command.setName("help").setDescription("Show commands available here"));
+  .addSubcommand((command) => command.setName("help").setDescription("Show commands available here"))
+  .addSubcommand((command) => command.setName("stop").setDescription("Stop the active job and clear its queue"))
+  .addSubcommand((command) => command.setName("steer").setDescription("Steer the active job").addStringOption((option) => option.setName("instructions").setDescription("New instructions").setRequired(true)))
+  .addSubcommand((command) => command.setName("compact").setDescription("Compact an idle job"))
+  .addSubcommand((command) => command.setName("status").setDescription("Show the current job status"))
+  .addSubcommand((command) => command.setName("jobs").setDescription("List your jobs"))
+  .addSubcommand((command) => command.setName("new").setDescription("Start a new session"));
 
 export type ChannelKind = "guild" | "thread" | "dm";
 
@@ -70,10 +77,19 @@ export function routeCommand(policy: DiscordPolicy, request: CommandRequest): Co
   };
 }
 
-export function attachInteractionRouter(client: Client, policy: DiscordPolicy): void {
+export function attachInteractionRouter(client: Client, policy: DiscordPolicy, jobs?: JobController): void {
   client.on("interactionCreate", (interaction) => {
     if (!interaction.isChatInputCommand()) return;
-    const response = routeCommand(policy, toCommandRequest(interaction));
+    const request = toCommandRequest(interaction);
+    const control = request.subcommand as JobControl;
+    if (jobs !== undefined && isJobControl(control) && canAccessWork(policy, accessSubject(request))) {
+      const argument = control === "steer" ? interaction.options.getString("instructions") ?? undefined : undefined;
+      void jobs.command(control, { channelKind: request.channelKind === "dm" ? "dm" : "thread", channelId: request.channelId, userId: request.userId }, argument)
+        .then(async (result) => interaction.reply({ content: result.content, ephemeral: true }))
+        .catch(async (error: unknown) => interaction.reply({ content: `Job control failed: ${error instanceof Error ? error.message : String(error)}`, ephemeral: true }));
+      return;
+    }
+    const response = routeCommand(policy, request);
     void interaction.reply({ content: response.content, ephemeral: response.ephemeral });
   });
 }
@@ -92,14 +108,41 @@ export function attachWorkMessageRouter(
   });
 }
 
+export function attachJobMessageRouter(client: Client, policy: DiscordPolicy, jobs: JobController): void {
+  client.on("messageCreate", (message) => {
+    const isDm = !message.inGuild();
+    const isThread = message.inGuild() && message.channel.isThread();
+    if ((!isDm && !isThread) || message.author.bot || message.content.trim() === "") return;
+    const channelId = isThread ? message.channel.parentId : message.channelId;
+    const access: DiscordAccessSubject = {
+      userId: message.author.id,
+      roleIds: message.inGuild() && message.member !== null ? [...message.member.roles.cache.keys()] : [],
+      guildId: message.guildId,
+      channelId,
+      isBot: false,
+      isDm,
+    };
+    if (!canAccessWork(policy, access)) return;
+    void jobs.message({ channelKind: isDm ? "dm" : "thread", channelId: message.channelId, userId: message.author.id, content: message.content })
+      .then(async (result) => {
+        for (const content of result.messages ?? []) await message.reply(content);
+      })
+      .catch((error: unknown) => {
+        console.error(`Failed to route job message ${message.id}: ${error instanceof Error ? error.message : String(error)}`);
+      });
+  });
+}
+
 export async function startDiscordGateway(
   discordToken: string,
   policy: DiscordPolicy,
   workMessages?: WorkMessageDependencies,
+  jobs?: JobController,
 ): Promise<Client> {
   const client = createDiscordClient();
-  attachInteractionRouter(client, policy);
+  attachInteractionRouter(client, policy, jobs);
   if (workMessages !== undefined) attachWorkMessageRouter(client, policy, workMessages);
+  if (jobs !== undefined) attachJobMessageRouter(client, policy, jobs);
   await client.login(discordToken);
   return client;
 }
@@ -122,6 +165,10 @@ function routeHelp(policy: DiscordPolicy, request: CommandRequest): CommandRespo
     return help("Casual chat", "Mention Clank for a no-tools conversation. Work and owner commands are unavailable here.");
   }
   return denial();
+}
+
+function isJobControl(value: string): value is JobControl {
+  return value === "stop" || value === "steer" || value === "compact" || value === "status" || value === "jobs" || value === "new";
 }
 
 function accessSubject(request: CommandRequest): DiscordAccessSubject {
