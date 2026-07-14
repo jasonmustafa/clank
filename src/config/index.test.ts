@@ -35,6 +35,18 @@ const policy = {
   workspaces: [
     { aliases: ["repo"], repository: "octo/repo", canonicalPath: "/srv/repos/repo" },
   ],
+  deployment: {
+    appPath: "/srv/clank/app",
+    remote: "origin",
+    branch: "main",
+    checks: {
+      install: ["npm", "ci"],
+      typecheck: ["npm", "run", "check"],
+      tests: ["npm", "test"],
+      build: ["npm", "run", "build"],
+      registerCommands: ["npm", "run", "register-commands"],
+    },
+  },
   paths: {
     state: "/srv/clank/state",
     workspaces: "/srv/clank/workspaces",

@@ -11,6 +11,7 @@ import { ApprovalService } from "./safety/index.js";
 import { attachApprovalInteractionRouter, DiscordApprovalMessenger } from "./safety/discord.js";
 import { createSystemRequestService, GithubHelperClient, SystemHelperClient } from "./helpers/index.js";
 import { ResourceUpdater } from "./resources/index.js";
+import { DeploymentManager, SpawnRunner } from "./deployment/index.js";
 
 export const serviceName = "clank";
 
@@ -62,6 +63,8 @@ async function main(): Promise<void> {
     checkoutRoot: config.policy.paths.resources,
     statePath: join(config.policy.paths.state, "resource-refs.json"),
   });
+  const helper = new SystemHelperClient();
+  const deployment = new DeploymentManager(config.policy.deployment, config.policy.paths.state, new SpawnRunner(), async (requesterId) => helper.invoke({ action: "service-restart" }, { requesterId }));
   const client = await startDiscordGateway(config.secrets.discordToken, config.policy.discord, {
     jobs,
     runner: new FakeRunner(),
@@ -72,16 +75,20 @@ async function main(): Promise<void> {
     attachmentIngestor: ingestor,
     takeAttachments: (job) => queueFor(job).take(),
     prepareWorkspace: async (jobId, request) => (await workspaces.prepare(workspaces.requestFrom(request), jobId)).path,
-  }, controller, { ingestor }, casual, { updater: resourceUpdater, sources: config.policy.resources });
+  }, controller, { ingestor }, casual, { updater: resourceUpdater, sources: config.policy.resources }, deployment);
   const approvals = await ApprovalService.open({
     directory: config.policy.paths.state,
     messenger: new DiscordApprovalMessenger(client),
     approverUserIds: [...config.policy.discord.ownerUserIds, ...config.policy.discord.privilegedApproverUserIds],
   });
   attachApprovalInteractionRouter(client, approvals);
-  const helper = new SystemHelperClient();
   const systemRequests = createSystemRequestService(config.policy.discord, approvals, (request, context) => helper.invoke(request, context));
   void systemRequests;
+  const pendingDeploy = await deployment.completePending();
+  if (pendingDeploy !== undefined) {
+    const channel = await client.channels.fetch(pendingDeploy.channelId);
+    if (channel?.isSendable() === true) await channel.send(`${pendingDeploy.operation === "deploy" ? "Deploy" : "Rollback"} to ${pendingDeploy.toCommit.slice(0, 12)} succeeded.`);
+  }
   console.log(`${serviceName} connected as ${client.user?.tag ?? "unknown user"}`);
 }
 

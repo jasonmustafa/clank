@@ -21,6 +21,7 @@ import { AttachmentIngestor, type DiscordAttachment } from "../attachments/index
 import { CasualController } from "./casual.js";
 import { handleResourcesUpdate, type ResourceUpdateHandler } from "./resources-update.js";
 import type { ResourceSource } from "../config/index.js";
+import { handleDeployment, type DeploymentHandler } from "./deployment.js";
 
 export const CLANK_COMMAND = new SlashCommandBuilder()
   .setName("clank")
@@ -32,6 +33,8 @@ export const CLANK_COMMAND = new SlashCommandBuilder()
   .addSubcommand((command) => command.setName("status").setDescription("Show the current job status"))
   .addSubcommand((command) => command.setName("jobs").setDescription("List your jobs"))
   .addSubcommand((command) => command.setName("new").setDescription("Start a new session"))
+  .addSubcommand((command) => command.setName("deploy").setDescription("Deploy the configured Clank branch"))
+  .addSubcommand((command) => command.setName("rollback").setDescription("Rollback to the previous good Clank commit"))
   .addSubcommand((command) => command.setName("resources-update").setDescription("Update trusted Pi resources").addBooleanOption((option) => option.setName("confirm").setDescription("Confirm extension/package code changes")));
 
 export type ChannelKind = "guild" | "thread" | "dm";
@@ -85,11 +88,18 @@ export function routeCommand(policy: DiscordPolicy, request: CommandRequest): Co
 
 export interface ResourceUpdateDependencies { updater: ResourceUpdateHandler; sources: readonly ResourceSource[]; }
 
-export function attachInteractionRouter(client: Client, policy: DiscordPolicy, jobs?: JobController, resources?: ResourceUpdateDependencies): void {
+export function attachInteractionRouter(client: Client, policy: DiscordPolicy, jobs?: JobController, resources?: ResourceUpdateDependencies, deployment?: DeploymentHandler): void {
   client.on("interactionCreate", (interaction) => {
     if (!interaction.isChatInputCommand()) return;
     const request = toCommandRequest(interaction);
     const control = request.subcommand as JobControl;
+    if ((request.subcommand === "deploy" || request.subcommand === "rollback") && deployment !== undefined) {
+      void interaction.deferReply({ ephemeral: true }).then(async () => {
+        const response = await handleDeployment(policy, request.userId, request.channelId, request.subcommand as "deploy" | "rollback", deployment);
+        await interaction.editReply(response.content);
+      }).catch(async () => interaction.editReply("Deployment failed unexpectedly. See service logs for details."));
+      return;
+    }
     if (request.subcommand === "resources-update" && resources !== undefined) {
       void handleResourcesUpdate(policy, request.userId, interaction.options.getBoolean("confirm") ?? false, resources.updater, resources.sources)
         .then(async (response) => interaction.reply({ content: response.content, ephemeral: true }))
@@ -192,9 +202,10 @@ export async function startDiscordGateway(
   attachments?: JobAttachmentDependencies,
   casual?: CasualController,
   resources?: ResourceUpdateDependencies,
+  deployment?: DeploymentHandler,
 ): Promise<Client> {
   const client = createDiscordClient();
-  attachInteractionRouter(client, policy, jobs, resources);
+  attachInteractionRouter(client, policy, jobs, resources, deployment);
   if (workMessages !== undefined) attachWorkMessageRouter(client, policy, workMessages);
   if (jobs !== undefined) attachJobMessageRouter(client, policy, jobs, attachments);
   if (casual !== undefined) attachCasualMessageRouter(client, casual);

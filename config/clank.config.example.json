@@ -43,6 +43,18 @@
       "extensions": ["extensions/*.ts"]
     }
   ],
+  "deployment": {
+    "appPath": "/srv/clank/app",
+    "remote": "origin",
+    "branch": "main",
+    "checks": {
+      "install": ["npm", "ci"],
+      "typecheck": ["npm", "run", "check"],
+      "tests": ["npm", "test"],
+      "build": ["npm", "run", "build"],
+      "registerCommands": ["npm", "run", "register-commands"]
+    }
+  },
   "paths": {
     "state": "<absolute-state-directory>",
     "workspaces": "<absolute-workspaces-directory>",

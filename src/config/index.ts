@@ -63,9 +63,23 @@ export interface ResourceSource {
   extensions: string[];
 }
 
+export interface DeploymentPolicy {
+  appPath: string;
+  remote: string;
+  branch: string;
+  checks: {
+    install: string[];
+    typecheck: string[];
+    tests: string[];
+    build: string[];
+    registerCommands: string[];
+  };
+}
+
 export interface ClankPolicy {
   discord: DiscordPolicy;
   github: GithubPolicy;
+  deployment: DeploymentPolicy;
   paths: PathPolicy;
   workspaces: WorkspaceRegistryEntry[];
   resources: ResourceSource[];
@@ -224,7 +238,8 @@ function validatePolicy(value: unknown, issues: string[]): ClankPolicy | undefin
   const discordValue = record(root.discord, "discord", issues);
   const githubValue = record(root.github, "github", issues);
   const pathsValue = record(root.paths, "paths", issues);
-  if (discordValue === undefined || githubValue === undefined || pathsValue === undefined) return undefined;
+  const deploymentValue = record(root.deployment, "deployment", issues);
+  if (discordValue === undefined || githubValue === undefined || pathsValue === undefined || deploymentValue === undefined) return undefined;
 
   const ownerUserIds = stringArray(discordValue.ownerUserIds, "discord.ownerUserIds", issues);
   if (ownerUserIds.length === 0) issues.push("discord.ownerUserIds must contain at least one owner user ID");
@@ -263,6 +278,19 @@ function validatePolicy(value: unknown, issues: string[]): ClankPolicy | undefin
     maxChangedLines: optionalPositiveInteger(githubValue.maxChangedLines, "github.maxChangedLines", 5000, issues),
     maxDiffBytes: optionalPositiveInteger(githubValue.maxDiffBytes, "github.maxDiffBytes", 1_000_000, issues),
   };
+  const checksValue = record(deploymentValue.checks, "deployment.checks", issues);
+  const deployment: DeploymentPolicy = {
+    appPath: absolutePath(deploymentValue.appPath, "deployment.appPath", issues),
+    remote: safeGitName(deploymentValue.remote, "deployment.remote", issues),
+    branch: safeGitName(deploymentValue.branch, "deployment.branch", issues),
+    checks: {
+      install: commandValue(checksValue?.install, "deployment.checks.install", issues),
+      typecheck: commandValue(checksValue?.typecheck, "deployment.checks.typecheck", issues),
+      tests: commandValue(checksValue?.tests, "deployment.checks.tests", issues),
+      build: commandValue(checksValue?.build, "deployment.checks.build", issues),
+      registerCommands: commandValue(checksValue?.registerCommands, "deployment.checks.registerCommands", issues),
+    },
+  };
   const paths: PathPolicy = {
     state: absolutePath(pathsValue.state, "paths.state", issues),
     workspaces: absolutePath(pathsValue.workspaces, "paths.workspaces", issues),
@@ -274,7 +302,7 @@ function validatePolicy(value: unknown, issues: string[]): ClankPolicy | undefin
   };
   const workspaces = workspaceEntries(root.workspaces, issues);
   const resources = resourceEntries(root.resources, issues);
-  return { discord, github, paths, workspaces, resources };
+  return { discord, github, deployment, paths, workspaces, resources };
 }
 
 function resourceEntries(value: unknown, issues: string[]): ResourceSource[] {
@@ -373,6 +401,18 @@ function optionalRateLimit(value: unknown, path: string, fallback: RateLimitPoli
     requests: optionalPositiveInteger(item.requests, `${path}.requests`, fallback.requests, issues),
     windowMs: optionalPositiveInteger(item.windowMs, `${path}.windowMs`, fallback.windowMs, issues),
   };
+}
+
+function commandValue(value: unknown, path: string, issues: string[]): string[] {
+  const command = stringArray(value, path, issues);
+  if (command.length === 0) issues.push(`${path} must contain an executable`);
+  return command;
+}
+
+function safeGitName(value: unknown, path: string, issues: string[]): string {
+  const result = stringValue(value, path, issues);
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/u.test(result) || result.includes("..")) issues.push(`${path} must be a safe git remote or branch name`);
+  return result;
 }
 
 function absolutePath(value: unknown, path: string, issues: string[]): string {
