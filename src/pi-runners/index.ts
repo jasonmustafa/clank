@@ -1,6 +1,8 @@
 import { mkdir } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { ImageContent } from "@earendil-works/pi-ai";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   AuthStorage,
   type AgentSessionRuntime,
@@ -23,9 +25,9 @@ export type PiRunnerEvent =
 export type PiRunnerListener = (event: PiRunnerEvent) => void | Promise<void>;
 
 export interface PiRunner {
-  prompt(prompt: string): Promise<readonly string[]>;
-  followUp(prompt: string): Promise<void>;
-  steer(prompt: string): Promise<void>;
+  prompt(prompt: string, images?: readonly ImageContent[]): Promise<readonly string[]>;
+  followUp(prompt: string, images?: readonly ImageContent[]): Promise<void>;
+  steer(prompt: string, images?: readonly ImageContent[]): Promise<void>;
   clearQueues(): void;
   queueSize(): number;
   abort(): Promise<void>;
@@ -47,22 +49,24 @@ abstract class EventedRunner {
   }
 }
 
-export interface FakeRunnerOptions { chunks?: readonly string[]; final?: string; }
+export interface FakeRunnerOptions { chunks?: readonly string[]; final?: string; customTools?: readonly ToolDefinition[]; }
 export class FakePiRunner extends EventedRunner implements PiRunner {
   readonly #chunks: readonly string[];
+  readonly customTools: readonly ToolDefinition[];
   readonly #final: string;
   #state: RunnerState = "idle";
   #sessionNumber = 1;
   #queuedMessages = 0;
-  readonly received: { text: string; behavior: "prompt" | "followUp" | "steer" }[] = [];
+  readonly received: { text: string; behavior: "prompt" | "followUp" | "steer"; images?: readonly ImageContent[] }[] = [];
   constructor(options: FakeRunnerOptions = {}) {
     super();
     this.#chunks = options.chunks ?? ["Clank is working..."];
     this.#final = options.final ?? "Fake runner completed the job.";
+    this.customTools = options.customTools ?? [];
   }
   status(): PiRunnerStatus { return { state: this.#state, sessionId: `fake-session-${String(this.#sessionNumber)}`, model: "fake/model" }; }
-  async prompt(prompt: string): Promise<readonly string[]> {
-    this.received.push({ text: prompt, behavior: "prompt" });
+  async prompt(prompt: string, images?: readonly ImageContent[]): Promise<readonly string[]> {
+    this.received.push({ text: prompt, behavior: "prompt", ...(images === undefined ? {} : { images }) });
     this.#state = "running";
     await this.emit({ type: "status", status: this.status() });
     for (const text of this.#chunks) await this.emit({ type: "text_delta", text });
@@ -72,8 +76,8 @@ export class FakePiRunner extends EventedRunner implements PiRunner {
     await this.emit({ type: "status", status: this.status() });
     return messages;
   }
-  followUp(text: string): Promise<void> { this.received.push({ text, behavior: "followUp" }); this.#queuedMessages += 1; return Promise.resolve(); }
-  steer(text: string): Promise<void> { this.received.push({ text, behavior: "steer" }); this.#queuedMessages += 1; return Promise.resolve(); }
+  followUp(text: string, images?: readonly ImageContent[]): Promise<void> { this.received.push({ text, behavior: "followUp", ...(images === undefined ? {} : { images }) }); this.#queuedMessages += 1; return Promise.resolve(); }
+  steer(text: string, images?: readonly ImageContent[]): Promise<void> { this.received.push({ text, behavior: "steer", ...(images === undefined ? {} : { images }) }); this.#queuedMessages += 1; return Promise.resolve(); }
   clearQueues(): void { this.#queuedMessages = 0; }
   queueSize(): number { return this.#queuedMessages; }
   setState(state: RunnerState): void { this.#state = state; }
@@ -103,6 +107,7 @@ export interface SdkPiRunnerOptions {
   trustedResourcePaths?: readonly string[];
   previewIntervalMs?: number;
   messageLimit?: number;
+  customTools?: ToolDefinition[];
 }
 
 export class SdkPiRunner extends EventedRunner implements PiRunner {
@@ -163,7 +168,7 @@ export class SdkPiRunner extends EventedRunner implements PiRunner {
       await resourceLoader.reload();
       services.resourceLoader = resourceLoader;
       return {
-        ...(await createAgentSessionFromServices({ services, sessionManager, model, thinkingLevel: options.thinkingLevel })),
+        ...(await createAgentSessionFromServices({ services, sessionManager, model, thinkingLevel: options.thinkingLevel, ...(options.customTools === undefined ? {} : { customTools: options.customTools }) })),
         services,
         diagnostics: services.diagnostics,
       };
@@ -177,7 +182,7 @@ export class SdkPiRunner extends EventedRunner implements PiRunner {
   }
 
   status(): PiRunnerStatus { return { state: this.#state, sessionId: this.#runtime.session.sessionId, model: this.#model }; }
-  async prompt(prompt: string): Promise<readonly string[]> {
+  async prompt(prompt: string, images?: readonly ImageContent[]): Promise<readonly string[]> {
     this.#assertIdle();
     this.#text = "";
     this.#lastPreviewAt = 0;
@@ -185,7 +190,7 @@ export class SdkPiRunner extends EventedRunner implements PiRunner {
     this.#eventQueue = Promise.resolve();
     await this.#setState("running");
     try {
-      await this.#runtime.session.prompt(prompt);
+      await this.#runtime.session.prompt(prompt, images === undefined ? undefined : { images: [...images] });
       await this.#eventQueue;
       if (this.#text !== this.#lastPreviewText) await this.emit({ type: "preview", text: this.#text });
       const messages = chunkDiscordMessage(this.#text, this.#messageLimit);
@@ -195,8 +200,8 @@ export class SdkPiRunner extends EventedRunner implements PiRunner {
       await this.#setState("idle");
     }
   }
-  async followUp(text: string): Promise<void> { await this.#runtime.session.prompt(text, { streamingBehavior: "followUp" }); }
-  async steer(text: string): Promise<void> { await this.#runtime.session.prompt(text, { streamingBehavior: "steer" }); }
+  async followUp(text: string, images?: readonly ImageContent[]): Promise<void> { await this.#runtime.session.prompt(text, { streamingBehavior: "followUp", ...(images === undefined ? {} : { images: [...images] }) }); }
+  async steer(text: string, images?: readonly ImageContent[]): Promise<void> { await this.#runtime.session.prompt(text, { streamingBehavior: "steer", ...(images === undefined ? {} : { images: [...images] }) }); }
   clearQueues(): void {
     this.#runtime.session.agent.clearSteeringQueue();
     this.#runtime.session.agent.clearFollowUpQueue();

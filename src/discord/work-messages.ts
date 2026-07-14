@@ -2,15 +2,17 @@ import { join } from "node:path";
 import { canAccessWork, type DiscordAccessSubject, type DiscordPolicy } from "../config/index.js";
 import { type Job, type JobManager } from "../jobs/index.js";
 import { type FakeRunner } from "../pi-runners/index.js";
+import { type AttachmentIngestor, type DiscordAttachment } from "../attachments/index.js";
 
 export interface WorkThread {
   id: string;
   name: string;
-  send(content: string): Promise<void>;
+  send(content: string, files?: readonly string[]): Promise<void>;
 }
 
 export interface WorkMessage {
   content: string;
+  attachments?: readonly DiscordAttachment[];
   access: DiscordAccessSubject & { guildId: string; channelId: string };
   startThread(name: string): Promise<WorkThread>;
 }
@@ -24,6 +26,8 @@ export interface WorkMessageDependencies {
   createJobId?: () => string;
   now?: () => Date;
   onJobCreated?: (job: Job) => void;
+  attachmentIngestor?: AttachmentIngestor;
+  takeAttachments?: (job: Job) => readonly string[];
 }
 
 export type WorkMessageResult = { handled: false } | { handled: true; jobId: string };
@@ -33,7 +37,7 @@ export async function handleWorkMessage(
   message: WorkMessage,
   dependencies: WorkMessageDependencies,
 ): Promise<WorkMessageResult> {
-  if (message.content.trim() === "" || !canAccessWork(policy, message.access)) return { handled: false };
+  if ((message.content.trim() === "" && (message.attachments?.length ?? 0) === 0) || !canAccessWork(policy, message.access)) return { handled: false };
 
   const id = dependencies.createJobId?.() ?? crypto.randomUUID();
   const now = dependencies.now ?? (() => new Date());
@@ -58,8 +62,15 @@ export async function handleWorkMessage(
 
   try {
     const runner = dependencies.runnerForJob?.(job) ?? dependencies.runner;
-    const final = await runner.run(message.content, async (text) => thread.send(text));
-    await thread.send(final);
+    const ingested = dependencies.attachmentIngestor === undefined || message.attachments === undefined
+      ? undefined
+      : await dependencies.attachmentIngestor.ingest(job.id, message.attachments);
+    const prompt = `${message.content}${ingested?.prompt ?? ""}`;
+    for (const error of ingested?.errors ?? []) await thread.send(error);
+    const final = await runner.run(prompt, async (text) => thread.send(text));
+    const outputFiles = dependencies.takeAttachments?.(job);
+    if (outputFiles === undefined || outputFiles.length === 0) await thread.send(final);
+    else await thread.send(final, outputFiles);
     await dependencies.jobs.setStatus(id, "completed");
   } catch (error) {
     await dependencies.jobs.setStatus(id, "failed");

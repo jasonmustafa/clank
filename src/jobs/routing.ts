@@ -1,10 +1,11 @@
 import type { Job, JobStatus } from "./index.js";
 import type { PiRunner } from "../pi-runners/index.js";
+import type { ImageContent } from "@earendil-works/pi-ai";
 
 export type JobChannelKind = "thread" | "dm";
 export interface JobTarget { channelKind: JobChannelKind; channelId: string; userId: string; }
-export interface JobMessage extends JobTarget { content: string; }
-export interface ControlResult { ok: boolean; content: string; jobId?: string; messages?: readonly string[]; }
+export interface JobMessage extends JobTarget { content: string; promptSuffix?: string; images?: readonly ImageContent[]; attachmentErrors?: readonly string[]; }
+export interface ControlResult { ok: boolean; content: string; jobId?: string; messages?: readonly string[]; files?: readonly string[]; }
 export type JobControl = "stop" | "steer" | "compact" | "status" | "jobs" | "new";
 
 /** Routes Discord conversations and controls without depending on discord.js. */
@@ -17,11 +18,13 @@ export class JobController {
     private readonly createRunner: (job: Job) => PiRunner,
     private readonly createDmJob?: (target: JobTarget) => Promise<Job>,
     private readonly saveJob: (job: Job) => Promise<void> = () => Promise.resolve(),
+    private readonly takeAttachments: (job: Job) => readonly string[] = () => [],
   ) {
     for (const job of jobs) this.#jobs.set(job.id, job);
   }
 
   get(id: string): Job | undefined { return this.#jobs.get(id); }
+  resolve(target: JobTarget): Job | undefined { return this.#resolve(target); }
   add(job: Job): void { this.#jobs.set(job.id, job); }
 
   async message(message: JobMessage): Promise<ControlResult> {
@@ -32,17 +35,19 @@ export class JobController {
     }
     if (job === undefined) return { ok: false, content: message.channelKind === "dm" ? "Start a new DM job with `/clank new`." : "This thread is not a Clank job." };
     const runner = this.#runner(job);
-    const explicitSteer = /^steer:\s*(.+)$/isu.exec(message.content);
+    const prompt = `${message.content}${message.promptSuffix ?? ""}`;
+    const explicitSteer = /^steer:\s*(.+)$/isu.exec(prompt);
     let messages: readonly string[] | undefined;
-    if (explicitSteer !== null) await runner.steer(explicitSteer[1] ?? "");
-    else if (runner.status().state === "running") await runner.followUp(message.content);
-    else messages = await runner.prompt(message.content);
+    if (explicitSteer !== null) await runner.steer(explicitSteer[1] ?? "", message.images);
+    else if (runner.status().state === "running") await runner.followUp(prompt, message.images);
+    else messages = await runner.prompt(prompt, message.images);
     job.status = "running";
     job.updatedAt = new Date().toISOString();
     await this.saveJob(job);
+    const errors = message.attachmentErrors ?? [];
     return messages === undefined
-      ? { ok: true, content: "Queued.", jobId: job.id }
-      : { ok: true, content: "Completed.", jobId: job.id, messages };
+      ? { ok: true, content: errors.length === 0 ? "Queued." : `Queued. ${errors.join(" ")}`, jobId: job.id }
+      : { ok: true, content: "Completed.", jobId: job.id, messages: [...errors, ...messages], files: this.takeAttachments(job) };
   }
 
   async command(command: JobControl, target: JobTarget, argument?: string): Promise<ControlResult> {

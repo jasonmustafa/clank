@@ -3,6 +3,8 @@ import { startDiscordGateway } from "./discord/index.js";
 import { JobManager, JobStore } from "./jobs/index.js";
 import { JobController } from "./jobs/routing.js";
 import { FakeRunner } from "./pi-runners/index.js";
+import { AttachmentIngestor, DiscordAttachmentQueue, createDiscordAttachTool } from "./attachments/index.js";
+import { join } from "node:path";
 
 export const serviceName = "clank";
 
@@ -10,20 +12,35 @@ async function main(): Promise<void> {
   const config = await loadConfig();
   const jobs = await JobManager.open(new JobStore(config.policy.paths.state));
   const runners = new Map<string, FakeRunner>();
-  const runnerFor = (jobId: string): FakeRunner => {
-    let runner = runners.get(jobId);
-    if (runner === undefined) { runner = new FakeRunner(); runners.set(jobId, runner); }
+  const attachmentQueues = new Map<string, DiscordAttachmentQueue>();
+  const queueFor = (job: { id: string; workspacePath: string }): DiscordAttachmentQueue => {
+    let queue = attachmentQueues.get(job.id);
+    if (queue === undefined) {
+      queue = new DiscordAttachmentQueue({ workspaceRoot: job.workspacePath, outputRoot: join(config.policy.paths.temporary, job.id, "output") });
+      attachmentQueues.set(job.id, queue);
+    }
+    return queue;
+  };
+  const runnerFor = (job: { id: string; workspacePath: string }): FakeRunner => {
+    let runner = runners.get(job.id);
+    if (runner === undefined) {
+      runner = new FakeRunner({ customTools: [createDiscordAttachTool(queueFor(job))] });
+      runners.set(job.id, runner);
+    }
     return runner;
   };
-  const controller = new JobController(jobs.list(), (job) => runnerFor(job.id), undefined, async (job) => jobs.update(job));
+  const ingestor = new AttachmentIngestor({ temporaryRoot: config.policy.paths.temporary });
+  const controller = new JobController(jobs.list(), runnerFor, undefined, async (job) => jobs.update(job), (job) => queueFor(job).take());
   const client = await startDiscordGateway(config.secrets.discordToken, config.policy.discord, {
     jobs,
     runner: new FakeRunner(),
-    runnerForJob: (job) => runnerFor(job.id),
+    runnerForJob: runnerFor,
     workspaceRoot: config.policy.paths.workspaces,
     sessionRoot: config.policy.paths.sessions,
     onJobCreated: (job) => { controller.add(job); },
-  }, controller);
+    attachmentIngestor: ingestor,
+    takeAttachments: (job) => queueFor(job).take(),
+  }, controller, { ingestor });
   console.log(`${serviceName} connected as ${client.user?.tag ?? "unknown user"}`);
 }
 

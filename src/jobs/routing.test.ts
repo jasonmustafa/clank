@@ -17,6 +17,20 @@ describe("JobController", () => {
     expect(runner.received).toEqual([{ text: "next", behavior: "followUp" }, { text: "change course", behavior: "steer" }]);
   });
 
+  it("passes attachment paths and images to Pi and returns queued output files", async () => {
+    const runner = new FakePiRunner({ final: "Done." });
+    const controller = new JobController([job()], () => runner, undefined, undefined, () => ["/w/j1/report.txt"]);
+    const result = await controller.message({
+      channelKind: "thread", channelId: "t1", userId: "u1", content: "inspect",
+      promptSuffix: "\n\nLocal Discord attachments:\n- /tmp/jobs/j1/attachments/photo.png (image/png)",
+      images: [{ type: "image", data: "AQID", mimeType: "image/png" }],
+    });
+    expect(runner.received[0]?.text).toContain("/tmp/jobs/j1/attachments/photo.png");
+    expect(runner.received[0]?.behavior).toBe("prompt");
+    expect(runner.received[0]?.images).toEqual([{ type: "image", data: "AQID", mimeType: "image/png" }]);
+    expect(result.files).toEqual(["/w/j1/report.txt"]);
+  });
+
   it("stops a job, clears its queues, and reports concise status", async () => {
     const runner = new FakePiRunner();
     const controller = new JobController([job()], () => runner);

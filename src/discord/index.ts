@@ -3,6 +3,7 @@ import {
   GatewayIntentBits,
   Partials,
   SlashCommandBuilder,
+  type Attachment,
   type ChatInputCommandInteraction,
   type Message,
 } from "discord.js";
@@ -16,6 +17,7 @@ import {
 } from "../config/index.js";
 import { handleWorkMessage, type WorkMessageDependencies } from "./work-messages.js";
 import { type JobControl, type JobController } from "../jobs/routing.js";
+import { AttachmentIngestor, type DiscordAttachment } from "../attachments/index.js";
 
 export const CLANK_COMMAND = new SlashCommandBuilder()
   .setName("clank")
@@ -108,11 +110,13 @@ export function attachWorkMessageRouter(
   });
 }
 
-export function attachJobMessageRouter(client: Client, policy: DiscordPolicy, jobs: JobController): void {
+export interface JobAttachmentDependencies { ingestor: AttachmentIngestor; }
+
+export function attachJobMessageRouter(client: Client, policy: DiscordPolicy, jobs: JobController, attachments?: JobAttachmentDependencies): void {
   client.on("messageCreate", (message) => {
     const isDm = !message.inGuild();
     const isThread = message.inGuild() && message.channel.isThread();
-    if ((!isDm && !isThread) || message.author.bot || message.content.trim() === "") return;
+    if ((!isDm && !isThread) || message.author.bot || (message.content.trim() === "" && message.attachments.size === 0)) return;
     const channelId = isThread ? message.channel.parentId : message.channelId;
     const access: DiscordAccessSubject = {
       userId: message.author.id,
@@ -123,10 +127,17 @@ export function attachJobMessageRouter(client: Client, policy: DiscordPolicy, jo
       isDm,
     };
     if (!canAccessWork(policy, access)) return;
-    void jobs.message({ channelKind: isDm ? "dm" : "thread", channelId: message.channelId, userId: message.author.id, content: message.content })
-      .then(async (result) => {
-        for (const content of result.messages ?? []) await message.reply(content);
-      })
+    const target = { channelKind: isDm ? "dm" as const : "thread" as const, channelId: message.channelId, userId: message.author.id };
+    void (async () => {
+      const job = jobs.resolve(target);
+      const ingested = attachments === undefined || job === undefined || message.attachments.size === 0
+        ? undefined
+        : await attachments.ingestor.ingest(job.id, [...message.attachments.values()].map(toAttachment));
+      return jobs.message({ ...target, content: message.content, ...(ingested === undefined ? {} : { promptSuffix: ingested.prompt, images: ingested.images, attachmentErrors: ingested.errors }) });
+    })().then(async (result) => {
+      if (result.messages === undefined) await message.reply(result.content);
+      else for (const [index, content] of result.messages.entries()) await message.reply(index === result.messages.length - 1 && result.files !== undefined && result.files.length > 0 ? { content, files: [...result.files] } : content);
+    })
       .catch((error: unknown) => {
         console.error(`Failed to route job message ${message.id}: ${error instanceof Error ? error.message : String(error)}`);
       });
@@ -138,11 +149,12 @@ export async function startDiscordGateway(
   policy: DiscordPolicy,
   workMessages?: WorkMessageDependencies,
   jobs?: JobController,
+  attachments?: JobAttachmentDependencies,
 ): Promise<Client> {
   const client = createDiscordClient();
   attachInteractionRouter(client, policy, jobs);
   if (workMessages !== undefined) attachWorkMessageRouter(client, policy, workMessages);
-  if (jobs !== undefined) attachJobMessageRouter(client, policy, jobs);
+  if (jobs !== undefined) attachJobMessageRouter(client, policy, jobs, attachments);
   await client.login(discordToken);
   return client;
 }
@@ -193,6 +205,7 @@ function denial(): CommandResponse {
 function toWorkMessage(message: Message<true>) {
   return {
     content: message.content,
+    attachments: [...message.attachments.values()].map(toAttachment),
     access: {
       userId: message.author.id,
       roleIds: message.member === null ? [] : [...message.member.roles.cache.keys()],
@@ -206,12 +219,16 @@ function toWorkMessage(message: Message<true>) {
       return {
         id: thread.id,
         name: thread.name,
-        send: async (content: string) => {
-          await thread.send(content);
+        send: async (content: string, files?: readonly string[]) => {
+          await thread.send(files === undefined || files.length === 0 ? content : { content, files: [...files] });
         },
       };
     },
   };
+}
+
+function toAttachment(attachment: Attachment): DiscordAttachment {
+  return { name: attachment.name, url: attachment.url, size: attachment.size, contentType: attachment.contentType };
 }
 
 function toCommandRequest(interaction: ChatInputCommandInteraction): CommandRequest {
