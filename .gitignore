@@ -1,13 +1,18 @@
 # Dependencies and build output
-node_modules/
-dist/
-coverage/
+/node_modules/
+/bower_components/
+/vendor/
+/dist/
+/build/
+/out/
+/coverage/
 *.tsbuildinfo
 
-# Local environment and secrets
+# Local environment, credentials, and keys
 .env
 .env.*
 !.env.example
+!**/.env.example
 *.pem
 *.key
 *.p12
@@ -15,17 +20,33 @@ coverage/
 id_rsa*
 id_ed25519*
 auth.json
+credentials.json
 hosts.yml
+.npmrc
+.netrc
+.pypirc
 
-# Local planning/runtime/config state
-.scratch/
-.clank-dev/
-config/clank.config.json
-config/*.local.json
-state/
-tmp/
-logs/
+# Local planning, config, and runtime data
+/.scratch/
+/.clank-dev/
+/config/*.json
+!/config/*.example.json
+/config/*.yaml
+!/config/*.example.yaml
+/config/*.yml
+!/config/*.example.yml
+/state/
+/sessions/
+/workspaces/
+/attachments/
+/tmp/
+/temp/
+/logs/
 *.log
+*.sqlite
+*.sqlite3
+*.db
+*.dump
 
 # OS/editor noise
 .DS_Store

@@ -12,6 +12,7 @@
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "check": "eslint . && tsc --noEmit",
+    "check:public": "tsx scripts/check-public-repo.ts",
     "test": "vitest run --passWithNoTests",
     "register-commands": "tsx src/discord/register-commands.ts"
   },

@@ -57,6 +57,8 @@ sudoedit /etc/clank/clank.env
 
 Replace every JSON placeholder and add `CLANK_DISCORD_TOKEN=...` to the environment file; add `CLANK_GITHUB_TOKEN=...` only when the GitHub helper is used. The systemd unit sets the non-secret production config path, so do not duplicate `CLANK_CONFIG_PATH` in this file. Never place secrets in the JSON policy.
 
+Deployment-specific values are configuration, never source constants. This includes the Git identity (`commitAuthorName` and `commitAuthorEmail`), trusted resource repository URLs and refs, the generated-by commit footer, and helper secret/environment paths. Keep placeholder-only examples in Git and set real values in the deployment's ignored config or root-owned environment file.
+
 ### Pi OpenAI subscription authentication
 
 Authenticate interactively as the service account so credentials are stored under its home, not root's or an administrator's:
@@ -139,10 +141,12 @@ Never commit Discord/GitHub tokens, API keys, Pi auth, `.env*` other than `.env.
 
 Pre-publication checklist:
 
-- [ ] Confirm `git status --ignored` and `git ls-files` contain only intended source/examples.
+- [ ] Run `npm run check:public`, then confirm `git status --ignored` and `git ls-files` contain only intended source/examples.
 - [ ] Search the working tree with a secret scanner such as `gitleaks detect --no-git` or `trufflehog filesystem .`.
-- [ ] Scan full history (`gitleaks git .` or equivalent), not only the current checkout.
-- [ ] Review `git log --all --stat`, branches, tags, stashes, reflogs, removed files, patches, issue exports, and CI artifacts for secrets and identifying IDs.
+- [ ] Scan and inspect full Git history (`gitleaks git .`, `git log --all --stat`, or equivalents), not only the current checkout.
+- [ ] Verify no runtime state, sessions, workspaces, attachments, logs, databases, dumps, or generated output are tracked.
+- [ ] Review `.scratch/` manually and verify it contains no secrets or identifying deployment values before publishing.
+- [ ] Review branches, tags, stashes, reflogs, removed files, patches, issue exports, and CI artifacts for secrets and identifying IDs.
 - [ ] Review example config, tests, snapshots, docs, remote URLs, commit messages/authors, and generated `dist`/coverage files.
 - [ ] If anything sensitive was ever committed, revoke/rotate it first, rewrite all affected history, force-update every ref, remove hosted caches/artifacts, and have every clone re-clone. Deleting the current file is insufficient.
 - [ ] Run tests and the scanner again from a fresh clone before publishing.
