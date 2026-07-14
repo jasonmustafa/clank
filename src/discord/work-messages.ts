@@ -28,6 +28,7 @@ export interface WorkMessageDependencies {
   onJobCreated?: (job: Job) => void;
   attachmentIngestor?: AttachmentIngestor;
   takeAttachments?: (job: Job) => readonly string[];
+  prepareWorkspace?: (jobId: string, request: string) => Promise<string>;
 }
 
 export type WorkMessageResult = { handled: false } | { handled: true; jobId: string };
@@ -44,12 +45,15 @@ export async function handleWorkMessage(
   const threadName = makeThreadName(id, message.content);
   const thread = await message.startThread(threadName);
   const timestamp = now().toISOString();
+  const workspacePath = dependencies.prepareWorkspace === undefined
+    ? join(dependencies.workspaceRoot, id)
+    : await dependencies.prepareWorkspace(id, message.content);
   const job: Job = {
     id,
     threadName: thread.name,
     status: "running",
     sessionPath: join(dependencies.sessionRoot, id),
-    workspacePath: join(dependencies.workspaceRoot, id),
+    workspacePath,
     requesterId: message.access.userId,
     guildId: message.access.guildId,
     channelId: message.access.channelId,

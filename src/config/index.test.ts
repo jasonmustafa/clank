@@ -30,7 +30,11 @@ const policy = {
     allowedRepositories: ["octo/repo"],
     commitAuthorName: "Clank",
     commitAuthorEmail: "clank@example.test",
+    commitFooter: "Generated-by: Clank, owner's clanker",
   },
+  workspaces: [
+    { aliases: ["repo"], repository: "octo/repo", canonicalPath: "/srv/repos/repo" },
+  ],
   paths: {
     state: "/srv/clank/state",
     workspaces: "/srv/clank/workspaces",
@@ -71,6 +75,7 @@ describe("loadConfig", () => {
 
     expect(config.secrets).toEqual({ discordToken: "discord-secret", githubToken: "github-secret" });
     expect(config.policy.discord.applicationId).toBe("app");
+    expect(config.policy.workspaces[0]?.repository).toBe("octo/repo");
     expect(env.CLANK_DISCORD_TOKEN).toBeUndefined();
     expect(env.CLANK_GITHUB_TOKEN).toBeUndefined();
   });

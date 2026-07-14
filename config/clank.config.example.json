@@ -19,8 +19,16 @@
     "allowedOwners": ["<github-owner>"],
     "allowedRepositories": ["<github-owner>/<github-repository>"],
     "commitAuthorName": "<git-author-name>",
-    "commitAuthorEmail": "<git-author-email>"
+    "commitAuthorEmail": "<github-verified-or-noreply-email>",
+    "commitFooter": "Generated-by: Clank, <owner's clanker>"
   },
+  "workspaces": [
+    {
+      "aliases": ["<repo-alias>"],
+      "repository": "<github-owner>/<github-repository>",
+      "canonicalPath": "<absolute-read-only-canonical-path>"
+    }
+  ],
   "paths": {
     "state": "<absolute-state-directory>",
     "workspaces": "<absolute-workspaces-directory>",

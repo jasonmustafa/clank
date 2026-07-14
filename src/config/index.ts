@@ -33,6 +33,13 @@ export interface GithubPolicy {
   allowedRepositories: string[];
   commitAuthorName: string;
   commitAuthorEmail: string;
+  commitFooter: string;
+}
+
+export interface WorkspaceRegistryEntry {
+  aliases: string[];
+  repository: string;
+  canonicalPath?: string;
 }
 
 export interface PathPolicy {
@@ -46,6 +53,7 @@ export interface ClankPolicy {
   discord: DiscordPolicy;
   github: GithubPolicy;
   paths: PathPolicy;
+  workspaces: WorkspaceRegistryEntry[];
 }
 
 export interface RuntimeConfig {
@@ -227,6 +235,7 @@ function validatePolicy(value: unknown, issues: string[]): ClankPolicy | undefin
     allowedRepositories: stringArray(githubValue.allowedRepositories, "github.allowedRepositories", issues),
     commitAuthorName: stringValue(githubValue.commitAuthorName, "github.commitAuthorName", issues),
     commitAuthorEmail: stringValue(githubValue.commitAuthorEmail, "github.commitAuthorEmail", issues),
+    commitFooter: stringValue(githubValue.commitFooter, "github.commitFooter", issues),
   };
   const paths: PathPolicy = {
     state: absolutePath(pathsValue.state, "paths.state", issues),
@@ -234,7 +243,28 @@ function validatePolicy(value: unknown, issues: string[]): ClankPolicy | undefin
     sessions: absolutePath(pathsValue.sessions, "paths.sessions", issues),
     temporary: absolutePath(pathsValue.temporary, "paths.temporary", issues),
   };
-  return { discord, github, paths };
+  const workspaces = workspaceEntries(root.workspaces, issues);
+  return { discord, github, paths, workspaces };
+}
+
+function workspaceEntries(value: unknown, issues: string[]): WorkspaceRegistryEntry[] {
+  if (!Array.isArray(value)) {
+    issues.push("workspaces must be an array");
+    return [];
+  }
+  return value.map((item, index) => {
+    const path = `workspaces[${String(index)}]`;
+    const entry = record(item, path, issues);
+    if (entry === undefined) return { aliases: [], repository: "" };
+    const canonicalPath = entry.canonicalPath === undefined
+      ? undefined
+      : absolutePath(entry.canonicalPath, `${path}.canonicalPath`, issues);
+    return {
+      aliases: stringArray(entry.aliases, `${path}.aliases`, issues),
+      repository: stringValue(entry.repository, `${path}.repository`, issues),
+      ...(canonicalPath === undefined ? {} : { canonicalPath }),
+    };
+  });
 }
 
 function record(value: unknown, path: string, issues: string[]): Record<string, unknown> | undefined {

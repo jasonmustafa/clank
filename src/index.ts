@@ -6,12 +6,21 @@ import { FakeRunner } from "./pi-runners/index.js";
 import { AttachmentIngestor, DiscordAttachmentQueue, createDiscordAttachTool } from "./attachments/index.js";
 import { join } from "node:path";
 import { CasualController, SdkCasualRunner } from "./discord/casual.js";
+import { WorkspaceRegistry } from "./workspaces/index.js";
 
 export const serviceName = "clank";
 
 async function main(): Promise<void> {
   const config = await loadConfig();
   const jobs = await JobManager.open(new JobStore(config.policy.paths.state));
+  const workspaces = new WorkspaceRegistry({
+    root: config.policy.paths.workspaces,
+    allowedRepositories: config.policy.github.allowedRepositories,
+    commitAuthorName: config.policy.github.commitAuthorName,
+    commitAuthorEmail: config.policy.github.commitAuthorEmail,
+    commitFooter: config.policy.github.commitFooter,
+    entries: config.policy.workspaces,
+  });
   const runners = new Map<string, FakeRunner>();
   const attachmentQueues = new Map<string, DiscordAttachmentQueue>();
   const queueFor = (job: { id: string; workspacePath: string }): DiscordAttachmentQueue => {
@@ -42,6 +51,7 @@ async function main(): Promise<void> {
     onJobCreated: (job) => { controller.add(job); },
     attachmentIngestor: ingestor,
     takeAttachments: (job) => queueFor(job).take(),
+    prepareWorkspace: async (jobId, request) => (await workspaces.prepare(workspaces.requestFrom(request), jobId)).path,
   }, controller, { ingestor }, casual);
   console.log(`${serviceName} connected as ${client.user?.tag ?? "unknown user"}`);
 }
