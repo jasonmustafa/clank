@@ -1,0 +1,2 @@
+Defaults!/usr/local/lib/clank/system-helper env_reset
+clank ALL=(root) NOPASSWD: /usr/local/lib/clank/system-helper ""

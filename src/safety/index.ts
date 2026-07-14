@@ -118,6 +118,19 @@ export class ApprovalService {
     return service;
   }
   get(id: string): Approval | undefined { return this.#approvals.get(id); }
+  async waitForDecision(id: string): Promise<Approval> {
+    for (;;) {
+      const approval = this.#approvals.get(id);
+      if (approval === undefined) throw new Error(`Unknown approval ${id}`);
+      if (approval.status !== "pending") return approval;
+      await this.expire();
+      const current = this.#approvals.get(id);
+      if (current?.status !== "pending") return current ?? approval;
+      await new Promise<void>((resolvePromise) => {
+        setTimeout(resolvePromise, Math.min(100, Math.max(1, approval.expiresAt - this.#now())));
+      });
+    }
+  }
   async request(input: { requesterId: string; channelId: string; summary: string; timeoutMs: number }): Promise<Approval> {
     const createdAt = this.#now();
     const approval: Approval = { id: crypto.randomUUID(), ...input, status: "pending", createdAt, expiresAt: createdAt + input.timeoutMs };

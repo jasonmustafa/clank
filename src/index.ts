@@ -7,6 +7,9 @@ import { AttachmentIngestor, DiscordAttachmentQueue, createDiscordAttachTool } f
 import { join } from "node:path";
 import { CasualController, SdkCasualRunner } from "./discord/casual.js";
 import { WorkspaceRegistry } from "./workspaces/index.js";
+import { ApprovalService } from "./safety/index.js";
+import { attachApprovalInteractionRouter, DiscordApprovalMessenger } from "./safety/discord.js";
+import { createSystemRequestService, SystemHelperClient } from "./helpers/index.js";
 
 export const serviceName = "clank";
 
@@ -53,6 +56,15 @@ async function main(): Promise<void> {
     takeAttachments: (job) => queueFor(job).take(),
     prepareWorkspace: async (jobId, request) => (await workspaces.prepare(workspaces.requestFrom(request), jobId)).path,
   }, controller, { ingestor }, casual);
+  const approvals = await ApprovalService.open({
+    directory: config.policy.paths.state,
+    messenger: new DiscordApprovalMessenger(client),
+    approverUserIds: [...config.policy.discord.ownerUserIds, ...config.policy.discord.privilegedApproverUserIds],
+  });
+  attachApprovalInteractionRouter(client, approvals);
+  const helper = new SystemHelperClient();
+  const systemRequests = createSystemRequestService(config.policy.discord, approvals, (request, context) => helper.invoke(request, context));
+  void systemRequests;
   console.log(`${serviceName} connected as ${client.user?.tag ?? "unknown user"}`);
 }
 
