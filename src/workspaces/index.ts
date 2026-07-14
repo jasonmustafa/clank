@@ -26,6 +26,11 @@ export interface GitExecutor {
   run(args: readonly string[], cwd?: string): Promise<void>;
 }
 
+export interface PrivateRepositoryClient {
+  clone(repository: string, destination: string): Promise<void>;
+  fetch(repository: string, workspacePath: string): Promise<void>;
+}
+
 export interface WorkspaceResolution {
   repository: string;
   source: string;
@@ -63,6 +68,7 @@ export class WorkspaceRegistry {
   constructor(
     private readonly policy: WorkspacePolicy,
     private readonly git: GitExecutor = new SystemGitExecutor(),
+    private readonly privateRepositories?: PrivateRepositoryClient,
   ) {
     for (const entry of policy.entries) {
       const repository = normalizeRepository(entry.repository);
@@ -111,7 +117,8 @@ export class WorkspaceRegistry {
 
     const resolution = this.resolve(request, jobId);
     try {
-      await this.git.run(["clone", "--", resolution.source, path]);
+      if (resolution.configured && this.privateRepositories !== undefined) await this.privateRepositories.clone(resolution.repository, path);
+      else await this.git.run(["clone", "--", resolution.source, path]);
       await this.git.run(["config", "--local", "user.name", this.policy.commitAuthorName], path);
       await this.git.run(["config", "--local", "user.email", this.policy.commitAuthorEmail], path);
       await installCommitMessageHook(path, this.policy.commitFooter);

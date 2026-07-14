@@ -20,7 +20,11 @@
     "allowedRepositories": ["<github-owner>/<github-repository>"],
     "commitAuthorName": "<git-author-name>",
     "commitAuthorEmail": "<github-verified-or-noreply-email>",
-    "commitFooter": "Generated-by: Clank, <owner's clanker>"
+    "commitFooter": "Generated-by: Clank, <owner's clanker>",
+    "defaultBaseBranch": "main",
+    "maxChangedFiles": 100,
+    "maxChangedLines": 5000,
+    "maxDiffBytes": 1000000
   },
   "workspaces": [
     {

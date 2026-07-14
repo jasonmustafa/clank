@@ -9,13 +9,14 @@ import { CasualController, SdkCasualRunner } from "./discord/casual.js";
 import { WorkspaceRegistry } from "./workspaces/index.js";
 import { ApprovalService } from "./safety/index.js";
 import { attachApprovalInteractionRouter, DiscordApprovalMessenger } from "./safety/discord.js";
-import { createSystemRequestService, SystemHelperClient } from "./helpers/index.js";
+import { createSystemRequestService, GithubHelperClient, SystemHelperClient } from "./helpers/index.js";
 
 export const serviceName = "clank";
 
 async function main(): Promise<void> {
   const config = await loadConfig();
   const jobs = await JobManager.open(new JobStore(config.policy.paths.state));
+  const github = new GithubHelperClient();
   const workspaces = new WorkspaceRegistry({
     root: config.policy.paths.workspaces,
     allowedRepositories: config.policy.github.allowedRepositories,
@@ -23,6 +24,17 @@ async function main(): Promise<void> {
     commitAuthorEmail: config.policy.github.commitAuthorEmail,
     commitFooter: config.policy.github.commitFooter,
     entries: config.policy.workspaces,
+  }, undefined, {
+    clone: async (repository, destination) => {
+      const jobId = destination.split("/").at(-1) ?? "";
+      const result = await github.invoke({ action: "clone", repository, destination }, { requesterId: "daemon", jobId });
+      if (!result.ok) throw new Error(result.error);
+    },
+    fetch: async (repository, workspacePath) => {
+      const jobId = workspacePath.split("/").at(-1) ?? "";
+      const result = await github.invoke({ action: "fetch", repository, workspacePath }, { requesterId: "daemon", jobId });
+      if (!result.ok) throw new Error(result.error);
+    },
   });
   const runners = new Map<string, FakeRunner>();
   const attachmentQueues = new Map<string, DiscordAttachmentQueue>();

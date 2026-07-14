@@ -34,6 +34,10 @@ export interface GithubPolicy {
   commitAuthorName: string;
   commitAuthorEmail: string;
   commitFooter: string;
+  defaultBaseBranch: string;
+  maxChangedFiles: number;
+  maxChangedLines: number;
+  maxDiffBytes: number;
 }
 
 export interface WorkspaceRegistryEntry {
@@ -230,12 +234,23 @@ function validatePolicy(value: unknown, issues: string[]): ClankPolicy | undefin
     casualUserRateLimit: optionalRateLimit(discordValue.casualUserRateLimit, "discord.casualUserRateLimit", { requests: 5, windowMs: 60_000 }, issues),
     casualGuildRateLimit: optionalRateLimit(discordValue.casualGuildRateLimit, "discord.casualGuildRateLimit", { requests: 20, windowMs: 60_000 }, issues),
   };
+  const allowedOwners = stringArray(githubValue.allowedOwners, "github.allowedOwners", issues).map((item) => item.toLowerCase());
+  const allowedRepositories = stringArray(githubValue.allowedRepositories, "github.allowedRepositories", issues).map((item) => item.toLowerCase());
+  const ownerPattern = /^[A-Za-z0-9_.-]+$/u;
+  const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u;
+  if (allowedOwners.some((owner) => !ownerPattern.test(owner))) issues.push("github.allowedOwners contains an invalid owner");
+  if (allowedRepositories.some((repository) => !repositoryPattern.test(repository))) issues.push("github.allowedRepositories contains an invalid repository");
+  if (allowedRepositories.some((repository) => !allowedOwners.includes(repository.split("/")[0] ?? ""))) issues.push("github.allowedRepositories must be owned by github.allowedOwners");
   const github: GithubPolicy = {
-    allowedOwners: stringArray(githubValue.allowedOwners, "github.allowedOwners", issues),
-    allowedRepositories: stringArray(githubValue.allowedRepositories, "github.allowedRepositories", issues),
+    allowedOwners,
+    allowedRepositories,
     commitAuthorName: stringValue(githubValue.commitAuthorName, "github.commitAuthorName", issues),
     commitAuthorEmail: stringValue(githubValue.commitAuthorEmail, "github.commitAuthorEmail", issues),
     commitFooter: stringValue(githubValue.commitFooter, "github.commitFooter", issues),
+    defaultBaseBranch: optionalString(githubValue.defaultBaseBranch, "github.defaultBaseBranch", "main", issues),
+    maxChangedFiles: optionalPositiveInteger(githubValue.maxChangedFiles, "github.maxChangedFiles", 100, issues),
+    maxChangedLines: optionalPositiveInteger(githubValue.maxChangedLines, "github.maxChangedLines", 5000, issues),
+    maxDiffBytes: optionalPositiveInteger(githubValue.maxDiffBytes, "github.maxDiffBytes", 1_000_000, issues),
   };
   const paths: PathPolicy = {
     state: absolutePath(pathsValue.state, "paths.state", issues),
@@ -293,6 +308,10 @@ function stringArray(value: unknown, path: string, issues: string[]): string[] {
 
 function optionalStringArray(value: unknown, path: string, issues: string[]): string[] {
   return value === undefined ? [] : stringArray(value, path, issues);
+}
+
+function optionalString(value: unknown, path: string, fallback: string, issues: string[]): string {
+  return value === undefined ? fallback : stringValue(value, path, issues);
 }
 
 function optionalPositiveInteger(value: unknown, path: string, fallback: number, issues: string[]): number {
