@@ -4,7 +4,7 @@ import { JobController } from "./routing.js";
 import type { Job } from "./index.js";
 
 function job(overrides: Partial<Job> = {}): Job {
-  return { id: "j1", threadName: "j1-work", status: "running", sessionPath: "/s/j1", workspacePath: "/w/j1", requesterId: "u1", guildId: "g1", channelId: "work", threadId: "t1", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", ...overrides };
+  return { id: "j1", profile: "normal", threadName: "j1-work", status: "running", sessionPath: "/s/j1", workspacePath: "/w/j1", requesterId: "u1", guildId: "g1", channelId: "work", threadId: "t1", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", ...overrides };
 }
 
 describe("JobController", () => {
@@ -15,6 +15,16 @@ describe("JobController", () => {
     await controller.message({ channelKind: "thread", channelId: "t1", userId: "u1", content: "next" });
     await controller.message({ channelKind: "thread", channelId: "t1", userId: "u1", content: "steer: change course" });
     expect(runner.received).toEqual([{ text: "next", behavior: "followUp" }, { text: "change course", behavior: "steer" }]);
+  });
+
+  it("allows only configured owners to continue elevated jobs", async () => {
+    const runner = new FakePiRunner();
+    const elevated = job({ profile: "elevated", requesterId: "owner" });
+    const withoutOwners = new JobController([elevated], () => runner);
+    expect((await withoutOwners.message({ channelKind: "thread", channelId: "t1", userId: "owner", content: "continue" })).ok).toBe(false);
+
+    const withOwner = new JobController([elevated], () => runner, undefined, undefined, undefined, undefined, ["owner"]);
+    expect((await withOwner.message({ channelKind: "thread", channelId: "t1", userId: "owner", content: "continue" })).ok).toBe(true);
   });
 
   it("passes attachment paths and images to Pi and returns queued output files", async () => {

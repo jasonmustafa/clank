@@ -81,11 +81,21 @@ export interface LifecyclePolicy {
   cleanupRetentionMs: number;
 }
 
+export interface WorkSafetyProfile {
+  confirmWorkspaceDestructive: boolean;
+}
+
+export interface SafetyPolicy {
+  normalWork: WorkSafetyProfile;
+  elevatedWork: WorkSafetyProfile;
+}
+
 export interface ClankPolicy {
   discord: DiscordPolicy;
   github: GithubPolicy;
   deployment: DeploymentPolicy;
   lifecycle: LifecyclePolicy;
+  safety: SafetyPolicy;
   paths: PathPolicy;
   workspaces: WorkspaceRegistryEntry[];
   resources: ResourceSource[];
@@ -173,8 +183,8 @@ export function canAccessWork(policy: DiscordPolicy, subject: DiscordAccessSubje
 
   const authorizedForGuildWork = explicitlyAuthorized
     || subject.roleIds.some((roleId) => policy.workRoleIds.includes(roleId));
-  const authorizedChannel = policy.workChannelIds.includes(subject.channelId)
-    || (isOwner(policy, subject.userId) && policy.elevatedChannelIds.includes(subject.channelId));
+  if (policy.elevatedChannelIds.includes(subject.channelId)) return authorizedForGuildWork && isOwner(policy, subject.userId);
+  const authorizedChannel = policy.workChannelIds.includes(subject.channelId);
   return authorizedForGuildWork && authorizedChannel;
 }
 
@@ -311,9 +321,16 @@ function validatePolicy(value: unknown, issues: string[]): ClankPolicy | undefin
     runnerIdleTtlMs: optionalPositiveInteger(lifecycleValue?.runnerIdleTtlMs, "lifecycle.runnerIdleTtlMs", 15 * 60_000, issues),
     cleanupRetentionMs: optionalPositiveInteger(lifecycleValue?.cleanupRetentionMs, "lifecycle.cleanupRetentionMs", 30 * 24 * 60 * 60_000, issues),
   };
+  const safetyValue = root.safety === undefined ? {} : record(root.safety, "safety", issues);
+  const normalWorkValue = safetyValue?.normalWork === undefined ? {} : record(safetyValue.normalWork, "safety.normalWork", issues);
+  const elevatedWorkValue = safetyValue?.elevatedWork === undefined ? {} : record(safetyValue.elevatedWork, "safety.elevatedWork", issues);
+  const safety: SafetyPolicy = {
+    normalWork: { confirmWorkspaceDestructive: optionalBoolean(normalWorkValue?.confirmWorkspaceDestructive, "safety.normalWork.confirmWorkspaceDestructive", true, issues) },
+    elevatedWork: { confirmWorkspaceDestructive: optionalBoolean(elevatedWorkValue?.confirmWorkspaceDestructive, "safety.elevatedWork.confirmWorkspaceDestructive", false, issues) },
+  };
   const workspaces = workspaceEntries(root.workspaces, issues);
   const resources = resourceEntries(root.resources, issues);
-  return { discord, github, deployment, lifecycle, paths, workspaces, resources };
+  return { discord, github, deployment, lifecycle, safety, paths, workspaces, resources };
 }
 
 function resourceEntries(value: unknown, issues: string[]): ResourceSource[] {
@@ -396,6 +413,12 @@ function optionalStringArray(value: unknown, path: string, issues: string[]): st
 
 function optionalString(value: unknown, path: string, fallback: string, issues: string[]): string {
   return value === undefined ? fallback : stringValue(value, path, issues);
+}
+
+function optionalBoolean(value: unknown, path: string, fallback: boolean, issues: string[]): boolean {
+  if (value === undefined) return fallback;
+  if (typeof value !== "boolean") { issues.push(`${path} must be a boolean`); return fallback; }
+  return value;
 }
 
 function optionalPositiveInteger(value: unknown, path: string, fallback: number, issues: string[]): number {

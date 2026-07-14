@@ -8,7 +8,7 @@ import { cleanupCompletedJobs, RunnerPool } from "./index.js";
 
 const dirs: string[] = [];
 afterEach(async () => { vi.useRealTimers(); await Promise.all(dirs.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
-function job(id: string, status: Job["status"] = "completed", updatedAt = "2026-01-01T00:00:00.000Z"): Job { return { id, threadName: id, status, sessionPath: `/sessions/${id}`, workspacePath: `/unused/${id}`, requesterId: "u", guildId: "g", channelId: "c", threadId: `t-${id}`, createdAt: updatedAt, updatedAt }; }
+function job(id: string, status: Job["status"] = "completed", updatedAt = "2026-01-01T00:00:00.000Z"): Job { return { id, profile: "normal", threadName: id, status, sessionPath: `/sessions/${id}`, workspacePath: `/unused/${id}`, requesterId: "u", guildId: "g", channelId: "c", threadId: `t-${id}`, createdAt: updatedAt, updatedAt }; }
 
 describe("RunnerPool", () => {
   it("disposes idle runners after TTL and recreates them without deleting metadata", async () => {

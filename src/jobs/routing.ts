@@ -19,6 +19,7 @@ export class JobController {
     private readonly saveJob: (job: Job) => Promise<void> = () => Promise.resolve(),
     private readonly takeAttachments: (job: Job) => readonly string[] = () => [],
     private readonly workspaceAvailable: (job: Job) => boolean | Promise<boolean> = () => true,
+    private readonly elevatedOwnerUserIds: readonly string[] = [],
   ) {
     for (const job of jobs) this.#jobs.set(job.id, job);
   }
@@ -89,7 +90,9 @@ export class JobController {
   }
 
   #resolve(target: JobTarget): Job | undefined {
-    if (target.channelKind === "thread") return [...this.#jobs.values()].find((job) => job.threadId === target.channelId && job.requesterId === target.userId);
+    if (target.channelKind === "thread") return [...this.#jobs.values()].find((job) => job.threadId === target.channelId
+      && job.requesterId === target.userId
+      && (job.profile !== "elevated" || this.elevatedOwnerUserIds.includes(target.userId)));
     return [...this.#jobs.values()]
       .filter((job) => job.guildId === "" && job.channelId === target.channelId && job.requesterId === target.userId && recent(job.status))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];

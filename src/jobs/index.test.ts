@@ -19,6 +19,7 @@ afterEach(async () => {
 function job(overrides: Partial<Job> = {}): Job {
   return {
     id: "job-1",
+    profile: "normal",
     threadName: "job-1-fix-the-build",
     status: "running",
     sessionPath: "/sessions/job-1",

@@ -62,7 +62,7 @@ async function main(): Promise<void> {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
       throw error;
     }
-  });
+  }, config.policy.discord.ownerUserIds);
   const casual = new CasualController(config.policy.discord, new SdkCasualRunner("/srv/clank/pi-agent"));
   const resourceUpdater = new ResourceUpdater({
     checkoutRoot: config.policy.paths.resources,

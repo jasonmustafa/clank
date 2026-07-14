@@ -5,7 +5,24 @@ import { createBashTool, type ExtensionAPI, type ExtensionFactory } from "@earen
 export type SafetyDecision = { action: "allow" } | { action: "deny" | "confirm"; reason: string };
 export type JobProfile = "normal" | "elevated";
 export interface PathSafetyPolicy { workspaceRoot: string; protectedRoots: readonly string[]; }
-export interface CommandSafetyPolicy extends PathSafetyPolicy { profile: JobProfile; }
+export interface CommandSafetyPolicy extends PathSafetyPolicy {
+  profile: JobProfile;
+  confirmWorkspaceDestructive?: boolean;
+}
+
+export interface WorkSafetyProfiles {
+  normalWork: { confirmWorkspaceDestructive: boolean };
+  elevatedWork: { confirmWorkspaceDestructive: boolean };
+}
+
+export function commandSafetyPolicy(
+  paths: PathSafetyPolicy,
+  profile: JobProfile,
+  profiles: WorkSafetyProfiles,
+): CommandSafetyPolicy {
+  const selected = profile === "elevated" ? profiles.elevatedWork : profiles.normalWork;
+  return { ...paths, profile, confirmWorkspaceDestructive: selected.confirmWorkspaceDestructive };
+}
 
 const SYSTEM_ROOTS = ["/boot", "/dev", "/etc", "/proc", "/root", "/run", "/sys", "/usr", "/var/lib", "/var/log"];
 const SECRET_NAME = /^(?:\.env(?:\..*)?|\.npmrc|\.pypirc|\.netrc|auth\.json|credentials(?:\.json)?|id_(?:rsa|ed25519)(?:\.pub)?|.*(?:token|secret|password).*)$/iu;
@@ -42,7 +59,8 @@ export function commandDecision(command: string, policy: CommandSafetyPolicy): S
   const privilegedMutation = /\b(?:sudo\b|mkfs\b|dd\s+.*\bof=|systemctl\s+(?:restart|stop)|apt(?:-get)?\s+(?:install|remove|purge))/iu.test(command);
   if (privilegedMutation) return { action: "confirm", reason: "Privileged mutation requires approval" };
   const workspaceDestructive = /(?:^|[;&|]\s*)(?:rm\s+(?:-[a-z]*[rf][a-z]*\s+|--recursive)|rmdir\b|shred\b|git\s+(?:reset\s+--hard|clean\s+-[a-z]*f)|chmod\s+-r|chown\s+-r)/iu.test(command);
-  if (workspaceDestructive && policy.profile === "normal") return { action: "confirm", reason: "Destructive command requires approval" };
+  const confirmWorkspaceDestructive = policy.confirmWorkspaceDestructive ?? policy.profile === "normal";
+  if (workspaceDestructive && confirmWorkspaceDestructive) return { action: "confirm", reason: "Destructive command requires approval" };
   return { action: "allow" };
 }
 

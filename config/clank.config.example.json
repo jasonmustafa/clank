@@ -59,6 +59,10 @@
     "runnerIdleTtlMs": 900000,
     "cleanupRetentionMs": 2592000000
   },
+  "safety": {
+    "normalWork": { "confirmWorkspaceDestructive": true },
+    "elevatedWork": { "confirmWorkspaceDestructive": false }
+  },
   "paths": {
     "state": "<absolute-state-directory>",
     "workspaces": "<absolute-workspaces-directory>",

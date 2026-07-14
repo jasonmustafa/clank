@@ -1,10 +1,12 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { JobProfile } from "../safety/index.js";
 
 export type JobStatus = "running" | "completed" | "failed" | "interrupted" | "stopped";
 
 export interface Job {
   id: string;
+  profile: JobProfile;
   threadName: string;
   status: JobStatus;
   sessionPath: string;
@@ -33,7 +35,10 @@ export class JobStore {
     try {
       const value: unknown = JSON.parse(await readFile(this.path, "utf8"));
       if (!isJobState(value)) throw new Error("Unsupported jobs state format");
-      return value.jobs;
+      return value.jobs.map((job) => {
+        const legacy = job as Omit<Job, "profile"> & { profile?: JobProfile };
+        return { ...legacy, profile: legacy.profile ?? "normal" };
+      });
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
       throw error;

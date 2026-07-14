@@ -54,6 +54,10 @@ const policy = {
     temporary: "/srv/clank/tmp",
     resources: "/srv/clank/resources",
   },
+  safety: {
+    normalWork: { confirmWorkspaceDestructive: true },
+    elevatedWork: { confirmWorkspaceDestructive: false },
+  },
   resources: [
     {
       id: "trusted-tools",
@@ -101,6 +105,7 @@ describe("loadConfig", () => {
     expect(config.policy.workspaces[0]?.repository).toBe("octo/repo");
     expect(config.policy.resources[0]).toEqual(policy.resources[0]);
     expect(config.policy.paths.resources).toBe("/srv/clank/resources");
+    expect(config.policy.safety).toEqual(policy.safety);
     expect(env.CLANK_DISCORD_TOKEN).toBeUndefined();
     expect(env.CLANK_GITHUB_TOKEN).toBeUndefined();
   });
@@ -126,6 +131,19 @@ describe("loadConfig", () => {
     const config = await loadConfig({ env: { CLANK_CONFIG_PATH: path }, cwd: "/unused", envPath });
 
     expect(config.secrets).toEqual({ discordToken: "file-discord", githubToken: "file-github" });
+  });
+
+  it("defaults safety profiles and rejects non-boolean options", async () => {
+    const withoutSafety: Record<string, unknown> = { ...policy };
+    delete withoutSafety.safety;
+    const defaultPath = await policyFile(withoutSafety);
+    const defaults = await loadConfig({ env: { CLANK_CONFIG_PATH: defaultPath, CLANK_DISCORD_TOKEN: "d", CLANK_GITHUB_TOKEN: "g" } });
+    expect(defaults.policy.safety.normalWork.confirmWorkspaceDestructive).toBe(true);
+    expect(defaults.policy.safety.elevatedWork.confirmWorkspaceDestructive).toBe(false);
+
+    const invalidPath = await policyFile({ ...policy, safety: { ...policy.safety, elevatedWork: { confirmWorkspaceDestructive: "no" } } });
+    await expect(loadConfig({ env: { CLANK_CONFIG_PATH: invalidPath, CLANK_DISCORD_TOKEN: "d", CLANK_GITHUB_TOKEN: "g" } }))
+      .rejects.toThrow("safety.elevatedWork.confirmWorkspaceDestructive");
   });
 
   it("rejects resource patterns that escape their checkout", async () => {
@@ -171,6 +189,7 @@ describe("authorization tiers", () => {
     expect(canAccessWork(discord, subject({ roleIds: ["work-role"], isDm: true, guildId: null }))).toBe(false);
     expect(canAccessWork(discord, subject({ userId: "owner", channelId: "elevated-channel" }))).toBe(true);
     expect(canAccessWork(discord, subject({ userId: "worker", channelId: "elevated-channel" }))).toBe(false);
+    expect(canAccessWork({ ...discord, workChannelIds: ["elevated-channel"] }, subject({ userId: "worker", channelId: "elevated-channel" }))).toBe(false);
     expect(canAccessWork(discord, subject({ userId: "worker", channelId: "other-channel" }))).toBe(false);
     expect(canAccessWork(discord, subject({ userId: "worker", channelId: "work-channel", guildId: "other-guild" }))).toBe(false);
     expect(canAccessWork(discord, subject({ userId: "approver", channelId: "work-channel" }))).toBe(false);

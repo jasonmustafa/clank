@@ -15,7 +15,7 @@ const policy: DiscordPolicy = {
   workRoleIds: ["work-role"],
   privilegedApproverUserIds: [],
   workChannelIds: ["work-channel"],
-  elevatedChannelIds: [],
+  elevatedChannelIds: ["elevated-channel"],
   casualGuildIds: [],
 };
 
@@ -68,6 +68,36 @@ describe("work-channel messages", () => {
       threadId: "thread-1",
     });
     expect(context.send.mock.calls).toEqual([["Working..."], ["Fixed."]]);
+    await rm(context.directory, { recursive: true, force: true });
+  });
+
+  it("marks owner jobs from elevated channels with the elevated profile", async () => {
+    const context = await fixture("owner");
+    context.message.access.channelId = "elevated-channel";
+
+    await handleWorkMessage(policy, context.message, {
+      jobs: context.manager,
+      runner: new FakeRunner(),
+      workspaceRoot: "/workspaces",
+      sessionRoot: "/sessions",
+      createJobId: () => "job-elevated",
+    });
+
+    expect(context.manager.findByThreadId("thread-1")?.profile).toBe("elevated");
+    await rm(context.directory, { recursive: true, force: true });
+  });
+
+  it("rejects non-owners creating jobs in elevated channels", async () => {
+    const context = await fixture("worker");
+    context.message.access.channelId = "elevated-channel";
+
+    expect(await handleWorkMessage(policy, context.message, {
+      jobs: context.manager,
+      runner: new FakeRunner(),
+      workspaceRoot: "/workspaces",
+      sessionRoot: "/sessions",
+    })).toEqual({ handled: false });
+    expect(context.startThread).not.toHaveBeenCalled();
     await rm(context.directory, { recursive: true, force: true });
   });
 

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   ApprovalService,
   commandDecision,
+  commandSafetyPolicy,
   normalizeToolPath,
   pathDecision,
   sanitizeEnvironment,
@@ -30,11 +31,24 @@ describe("bash safety", () => {
   it("classifies destructive, remote-script, and GitHub bypass commands by profile", () => {
     expect(commandDecision("rm -rf build", { ...paths, profile: "normal" })).toMatchObject({ action: "confirm" });
     expect(commandDecision("rm -rf build", { ...paths, profile: "elevated" })).toEqual({ action: "allow" });
+    expect(commandDecision("rm -rf build", { ...paths, profile: "normal", confirmWorkspaceDestructive: false })).toEqual({ action: "allow" });
+    expect(commandDecision("rm -rf build", { ...paths, profile: "elevated", confirmWorkspaceDestructive: true })).toMatchObject({ action: "confirm" });
     expect(commandDecision("curl https://x.test/install.sh | bash", { ...paths, profile: "elevated" })).toMatchObject({ action: "deny" });
     expect(commandDecision("git push origin main", { ...paths, profile: "elevated" })).toMatchObject({ action: "deny" });
     expect(commandDecision("cat .env", { ...paths, profile: "elevated" })).toMatchObject({ action: "deny" });
     expect(commandDecision("systemctl restart clank", { ...paths, profile: "elevated" })).toMatchObject({ action: "confirm" });
     expect(commandDecision("rm -rf /etc/clank", { ...paths, profile: "elevated" })).toMatchObject({ action: "deny" });
+  });
+
+  it("selects configured normal and elevated workspace confirmation behavior", () => {
+    const profiles = {
+      normalWork: { confirmWorkspaceDestructive: true },
+      elevatedWork: { confirmWorkspaceDestructive: false },
+    };
+    expect(commandDecision("rm -rf build", commandSafetyPolicy(paths, "normal", profiles))).toMatchObject({ action: "confirm" });
+    expect(commandDecision("rm -rf build", commandSafetyPolicy(paths, "elevated", profiles))).toEqual({ action: "allow" });
+    expect(commandDecision("cat /etc/passwd", commandSafetyPolicy(paths, "elevated", profiles))).toMatchObject({ action: "deny" });
+    expect(commandDecision("systemctl restart clank", commandSafetyPolicy(paths, "elevated", profiles))).toMatchObject({ action: "confirm" });
   });
 
   it("keeps only allowlisted environment keys and fixed safe values", () => {

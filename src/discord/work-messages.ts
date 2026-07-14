@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { canAccessWork, type DiscordAccessSubject, type DiscordPolicy } from "../config/index.js";
+import { canAccessElevated, canAccessWork, type DiscordAccessSubject, type DiscordPolicy } from "../config/index.js";
 import { type Job, type JobManager } from "../jobs/index.js";
 import { type FakeRunner } from "../pi-runners/index.js";
 import { type AttachmentIngestor, type DiscordAttachment } from "../attachments/index.js";
@@ -50,6 +50,7 @@ export async function handleWorkMessage(
     : await dependencies.prepareWorkspace(id, message.content);
   const job: Job = {
     id,
+    profile: canAccessElevated(policy, message.access) ? "elevated" : "normal",
     threadName: thread.name,
     status: "running",
     sessionPath: join(dependencies.sessionRoot, id),
