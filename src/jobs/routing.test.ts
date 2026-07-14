@@ -31,6 +31,14 @@ describe("JobController", () => {
     expect(result.files).toEqual(["/w/j1/report.txt"]);
   });
 
+  it("fails clearly without creating a runner when a retained job workspace was cleaned", async () => {
+    let runnersCreated = 0;
+    const controller = new JobController([job({ status: "completed" })], () => { runnersCreated += 1; return new FakePiRunner(); }, undefined, undefined, undefined, () => false);
+    const result = await controller.message({ channelKind: "thread", channelId: "t1", userId: "u1", content: "resume" });
+    expect(result).toEqual({ ok: false, content: "Job j1's workspace was cleaned up; start a new job.", jobId: "j1" });
+    expect(runnersCreated).toBe(0);
+  });
+
   it("stops a job, clears its queues, and reports concise status", async () => {
     const runner = new FakePiRunner();
     const controller = new JobController([job()], () => runner);

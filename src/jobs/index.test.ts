@@ -90,6 +90,7 @@ describe("JobManager", () => {
     expect(manager.findByThreadId("thread-1")?.status).toBe("interrupted");
     expect(manager.findByThreadId("thread-1")?.updatedAt).toBe("2026-07-12T11:00:00.000Z");
     expect(manager.findByThreadId("thread-2")?.status).toBe("completed");
+    expect(manager.recoveredJobs().map(({ id }) => id)).toEqual(["job-1"]);
     await expect(store.load()).resolves.toEqual(manager.list());
   });
 });

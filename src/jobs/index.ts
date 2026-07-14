@@ -64,29 +64,37 @@ function isJobState(value: unknown): value is JobState {
 
 export class JobManager {
   readonly #jobs: Map<string, Job>;
+  readonly #recoveredJobIds: readonly string[];
   #operations: Promise<void> = Promise.resolve();
 
   private constructor(
     private readonly store: JobStore,
     jobs: readonly Job[],
     private readonly now: () => Date,
+    recoveredJobIds: readonly string[] = [],
   ) {
     this.#jobs = new Map(jobs.map((job) => [job.id, job]));
+    this.#recoveredJobIds = [...recoveredJobIds];
   }
 
   static async open(store: JobStore, now: () => Date = () => new Date()): Promise<JobManager> {
     const jobs = await store.load();
     const timestamp = now().toISOString();
-    const hadRunningJobs = jobs.some((job) => job.status === "running");
+    const recoveredJobIds = jobs.filter((job) => job.status === "running").map((job) => job.id);
     const recovered = jobs.map((job) => job.status === "running"
       ? { ...job, status: "interrupted" as const, updatedAt: timestamp }
       : job);
-    if (hadRunningJobs) await store.save(recovered);
-    return new JobManager(store, recovered, now);
+    if (recoveredJobIds.length > 0) await store.save(recovered);
+    return new JobManager(store, recovered, now, recoveredJobIds);
   }
 
   list(): Job[] {
     return [...this.#jobs.values()];
+  }
+
+  recoveredJobs(): Job[] {
+    const ids = new Set(this.#recoveredJobIds);
+    return this.list().filter((job) => ids.has(job.id));
   }
 
   findByThreadId(threadId: string): Job | undefined {

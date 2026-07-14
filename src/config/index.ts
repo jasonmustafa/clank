@@ -76,10 +76,16 @@ export interface DeploymentPolicy {
   };
 }
 
+export interface LifecyclePolicy {
+  runnerIdleTtlMs: number;
+  cleanupRetentionMs: number;
+}
+
 export interface ClankPolicy {
   discord: DiscordPolicy;
   github: GithubPolicy;
   deployment: DeploymentPolicy;
+  lifecycle: LifecyclePolicy;
   paths: PathPolicy;
   workspaces: WorkspaceRegistryEntry[];
   resources: ResourceSource[];
@@ -300,9 +306,14 @@ function validatePolicy(value: unknown, issues: string[]): ClankPolicy | undefin
       ? join(absolutePath(pathsValue.state, "paths.state", issues), "resources")
       : absolutePath(pathsValue.resources, "paths.resources", issues),
   };
+  const lifecycleValue = root.lifecycle === undefined ? {} : record(root.lifecycle, "lifecycle", issues);
+  const lifecycle: LifecyclePolicy = {
+    runnerIdleTtlMs: optionalPositiveInteger(lifecycleValue?.runnerIdleTtlMs, "lifecycle.runnerIdleTtlMs", 15 * 60_000, issues),
+    cleanupRetentionMs: optionalPositiveInteger(lifecycleValue?.cleanupRetentionMs, "lifecycle.cleanupRetentionMs", 30 * 24 * 60 * 60_000, issues),
+  };
   const workspaces = workspaceEntries(root.workspaces, issues);
   const resources = resourceEntries(root.resources, issues);
-  return { discord, github, deployment, paths, workspaces, resources };
+  return { discord, github, deployment, lifecycle, paths, workspaces, resources };
 }
 
 function resourceEntries(value: unknown, issues: string[]): ResourceSource[] {

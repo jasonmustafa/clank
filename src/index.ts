@@ -1,10 +1,12 @@
 import { loadConfig } from "./config/index.js";
 import { startDiscordGateway } from "./discord/index.js";
-import { JobManager, JobStore } from "./jobs/index.js";
+import { JobManager, JobStore, type Job } from "./jobs/index.js";
 import { JobController } from "./jobs/routing.js";
 import { FakeRunner } from "./pi-runners/index.js";
 import { AttachmentIngestor, DiscordAttachmentQueue, createDiscordAttachTool } from "./attachments/index.js";
 import { join } from "node:path";
+import { access } from "node:fs/promises";
+import { cleanupCompletedJobs, RunnerPool } from "./lifecycle/index.js";
 import { CasualController, SdkCasualRunner } from "./discord/casual.js";
 import { WorkspaceRegistry } from "./workspaces/index.js";
 import { ApprovalService } from "./safety/index.js";
@@ -38,7 +40,11 @@ async function main(): Promise<void> {
       if (!result.ok) throw new Error(result.error);
     },
   });
-  const runners = new Map<string, FakeRunner>();
+  await cleanupCompletedJobs(jobs.list(), {
+    workspaceRoot: config.policy.paths.workspaces,
+    temporaryRoot: config.policy.paths.temporary,
+    retentionMs: config.policy.lifecycle.cleanupRetentionMs,
+  });
   const attachmentQueues = new Map<string, DiscordAttachmentQueue>();
   const queueFor = (job: { id: string; workspacePath: string }): DiscordAttachmentQueue => {
     let queue = attachmentQueues.get(job.id);
@@ -48,16 +54,15 @@ async function main(): Promise<void> {
     }
     return queue;
   };
-  const runnerFor = (job: { id: string; workspacePath: string }): FakeRunner => {
-    let runner = runners.get(job.id);
-    if (runner === undefined) {
-      runner = new FakeRunner({ customTools: [createDiscordAttachTool(queueFor(job))] });
-      runners.set(job.id, runner);
-    }
-    return runner;
-  };
+  const runnerPool = new RunnerPool<FakeRunner>((job) => new FakeRunner({ customTools: [createDiscordAttachTool(queueFor(job))] }), config.policy.lifecycle.runnerIdleTtlMs);
+  const runnerFor = (job: { id: string; workspacePath: string }): FakeRunner => runnerPool.get(job as Job);
   const ingestor = new AttachmentIngestor({ temporaryRoot: config.policy.paths.temporary });
-  const controller = new JobController(jobs.list(), runnerFor, undefined, async (job) => jobs.update(job), (job) => queueFor(job).take());
+  const controller = new JobController(jobs.list(), runnerFor, undefined, async (job) => jobs.update(job), (job) => queueFor(job).take(), async (job) => {
+    try { await access(job.workspacePath); return true; } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+      throw error;
+    }
+  });
   const casual = new CasualController(config.policy.discord, new SdkCasualRunner("/srv/clank/pi-agent"));
   const resourceUpdater = new ResourceUpdater({
     checkoutRoot: config.policy.paths.resources,
@@ -76,6 +81,22 @@ async function main(): Promise<void> {
     takeAttachments: (job) => queueFor(job).take(),
     prepareWorkspace: async (jobId, request) => (await workspaces.prepare(workspaces.requestFrom(request), jobId)).path,
   }, controller, { ingestor }, casual, { updater: resourceUpdater, sources: config.policy.resources }, deployment);
+  for (const recovered of jobs.recoveredJobs()) {
+    let posted = false;
+    for (const channelId of [...new Set([recovered.threadId, recovered.channelId].filter((id) => id !== ""))]) {
+      try {
+        const channel = await client.channels.fetch(channelId);
+        if (channel?.isSendable() === true) {
+          await channel.send(`Job ${recovered.id} was interrupted because Clank restarted. Reply in its thread to resume the saved session.`);
+          posted = true;
+          break;
+        }
+      } catch (error) {
+        console.warn(`Could not post restart notice for job ${recovered.id} in channel ${channelId}:`, error);
+      }
+    }
+    if (!posted) console.warn(`No restart notice destination was available for job ${recovered.id}.`);
+  }
   const approvals = await ApprovalService.open({
     directory: config.policy.paths.state,
     messenger: new DiscordApprovalMessenger(client),

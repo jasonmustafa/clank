@@ -11,7 +11,6 @@ export type JobControl = "stop" | "steer" | "compact" | "status" | "jobs" | "new
 /** Routes Discord conversations and controls without depending on discord.js. */
 export class JobController {
   readonly #jobs = new Map<string, Job>();
-  readonly #runners = new Map<string, PiRunner>();
 
   constructor(
     jobs: readonly Job[],
@@ -19,6 +18,7 @@ export class JobController {
     private readonly createDmJob?: (target: JobTarget) => Promise<Job>,
     private readonly saveJob: (job: Job) => Promise<void> = () => Promise.resolve(),
     private readonly takeAttachments: (job: Job) => readonly string[] = () => [],
+    private readonly workspaceAvailable: (job: Job) => boolean | Promise<boolean> = () => true,
   ) {
     for (const job of jobs) this.#jobs.set(job.id, job);
   }
@@ -34,6 +34,7 @@ export class JobController {
       this.#jobs.set(job.id, job);
     }
     if (job === undefined) return { ok: false, content: message.channelKind === "dm" ? "Start a new DM job with `/clank new`." : "This thread is not a Clank job." };
+    if (!(await this.workspaceAvailable(job))) return { ok: false, content: `Job ${job.id}'s workspace was cleaned up; start a new job.`, jobId: job.id };
     const runner = this.#runner(job);
     const prompt = `${message.content}${message.promptSuffix ?? ""}`;
     const explicitSteer = /^steer:\s*(.+)$/isu.exec(prompt);
@@ -95,9 +96,8 @@ export class JobController {
   }
 
   #runner(job: Job): PiRunner {
-    let runner = this.#runners.get(job.id);
-    if (runner === undefined) { runner = this.createRunner(job); this.#runners.set(job.id, runner); }
-    return runner;
+    // Runner lifecycle and caching belong to the injected factory (normally RunnerPool).
+    return this.createRunner(job);
   }
 
   #list(userId: string): string {

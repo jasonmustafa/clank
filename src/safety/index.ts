@@ -109,12 +109,13 @@ export class ApprovalService {
     catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; }
     const service = new ApprovalService(options, approvals);
     const pending = approvals.filter((approval) => approval.status === "pending");
-    for (const approval of pending) {
-      const expired = { ...approval, status: "expired" as const };
-      service.#approvals.set(expired.id, expired);
-      await options.messenger.update(expired);
+    const expired = pending.map((approval) => ({ ...approval, status: "expired" as const }));
+    for (const approval of expired) service.#approvals.set(approval.id, approval);
+    if (expired.length > 0) {
+      // Make restart cancellation durable before best-effort Discord message edits.
+      await service.#save();
+      await Promise.allSettled(expired.map(async (approval) => options.messenger.update(approval)));
     }
-    if (pending.length > 0) await service.#save();
     return service;
   }
   get(id: string): Approval | undefined { return this.#approvals.get(id); }

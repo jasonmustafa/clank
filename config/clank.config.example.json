@@ -55,6 +55,10 @@
       "registerCommands": ["npm", "run", "register-commands"]
     }
   },
+  "lifecycle": {
+    "runnerIdleTtlMs": 900000,
+    "cleanupRetentionMs": 2592000000
+  },
   "paths": {
     "state": "<absolute-state-directory>",
     "workspaces": "<absolute-workspaces-directory>",

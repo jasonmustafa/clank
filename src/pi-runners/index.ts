@@ -182,7 +182,8 @@ export class SdkPiRunner extends EventedRunner implements PiRunner {
     const runtime = await createAgentSessionRuntime(createRuntime, {
       cwd: options.cwd,
       agentDir: options.agentDir,
-      sessionManager: SessionManager.create(options.cwd, sessionDir),
+      // Per-job session directories make continuing the most recent saved session safe.
+      sessionManager: SessionManager.continueRecent(options.cwd, sessionDir),
     });
     return new SdkPiRunner(runtime, options);
   }
