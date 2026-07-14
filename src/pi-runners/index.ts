@@ -14,6 +14,7 @@ import {
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { chunkDiscordMessage } from "../formatting/index.js";
+import { createSafetyExtension, type SafetyExtensionOptions } from "../safety/index.js";
 
 export type RunnerState = "idle" | "running" | "compacting" | "disposed";
 export interface PiRunnerStatus { state: RunnerState; sessionId: string; model: string; }
@@ -108,6 +109,7 @@ export interface SdkPiRunnerOptions {
   previewIntervalMs?: number;
   messageLimit?: number;
   customTools?: ToolDefinition[];
+  safety: SafetyExtensionOptions;
 }
 
 export class SdkPiRunner extends EventedRunner implements PiRunner {
@@ -164,6 +166,7 @@ export class SdkPiRunner extends EventedRunner implements PiRunner {
         additionalSkillPaths: trustedPaths,
         additionalPromptTemplatePaths: trustedPaths,
         additionalThemePaths: trustedPaths,
+        extensionFactories: [createSafetyExtension(options.safety)],
       });
       await resourceLoader.reload();
       services.resourceLoader = resourceLoader;
