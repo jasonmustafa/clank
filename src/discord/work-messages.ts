@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { canAccessElevated, canAccessWork, type DiscordAccessSubject, type DiscordPolicy } from "../config/index.js";
 import { type Job, type JobManager } from "../jobs/index.js";
-import { type FakeRunner } from "../pi-runners/index.js";
+import { type PiRunner } from "../pi-runners/index.js";
 import { type AttachmentIngestor, type DiscordAttachment } from "../attachments/index.js";
 
 export interface WorkThread {
@@ -19,8 +19,8 @@ export interface WorkMessage {
 
 export interface WorkMessageDependencies {
   jobs: JobManager;
-  runner: FakeRunner;
-  runnerForJob?: (job: Job) => FakeRunner;
+  runner?: PiRunner;
+  runnerForJob?: (job: Job) => PiRunner;
   workspaceRoot: string;
   sessionRoot: string;
   createJobId?: () => string;
@@ -67,15 +67,27 @@ export async function handleWorkMessage(
 
   try {
     const runner = dependencies.runnerForJob?.(job) ?? dependencies.runner;
+    if (runner === undefined) throw new Error("No Pi runner is configured");
     const ingested = dependencies.attachmentIngestor === undefined || message.attachments === undefined
       ? undefined
       : await dependencies.attachmentIngestor.ingest(job.id, message.attachments);
     const prompt = `${message.content}${ingested?.prompt ?? ""}`;
     for (const error of ingested?.errors ?? []) await thread.send(error);
-    const final = await runner.run(prompt, async (text) => thread.send(text));
+    const legacyRunner = runner as PiRunner & { run?: (text: string, onText: (text: string) => Promise<void>) => Promise<string> };
     const outputFiles = dependencies.takeAttachments?.(job);
-    if (outputFiles === undefined || outputFiles.length === 0) await thread.send(final);
-    else await thread.send(final, outputFiles);
+    if (legacyRunner.run !== undefined) {
+      const final = await legacyRunner.run(prompt, async (text) => thread.send(text));
+      if (outputFiles === undefined || outputFiles.length === 0) await thread.send(final);
+      else await thread.send(final, outputFiles);
+    } else {
+      await thread.send("Clank is working...");
+      const messages = await runner.prompt(prompt);
+      for (let index = 0; index < messages.length; index += 1) {
+        const files = index === messages.length - 1 && outputFiles !== undefined && outputFiles.length > 0 ? outputFiles : undefined;
+        if (files === undefined) await thread.send(messages[index] ?? "");
+        else await thread.send(messages[index] ?? "", files);
+      }
+    }
     await dependencies.jobs.setStatus(id, "completed");
   } catch (error) {
     await dependencies.jobs.setStatus(id, "failed");

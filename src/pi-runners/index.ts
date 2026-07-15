@@ -99,6 +99,30 @@ export class FakePiRunner extends EventedRunner implements PiRunner {
 /** Backward-compatible name for early callers. */
 export { FakePiRunner as FakeRunner };
 
+/** Synchronous facade for the SDK runner's asynchronous initialization. */
+export class LazyPiRunner extends EventedRunner implements PiRunner {
+  readonly #create: () => Promise<PiRunner>;
+  #runner: Promise<PiRunner> | undefined;
+  constructor(create: () => Promise<PiRunner>) { super(); this.#create = create; }
+  status(): PiRunnerStatus { return { state: "idle", sessionId: "initializing", model: "initializing" }; }
+  prompt(prompt: string, images?: readonly ImageContent[]): Promise<readonly string[]> { return this.#get().then((runner) => runner.prompt(prompt, images)); }
+  followUp(prompt: string, images?: readonly ImageContent[]): Promise<void> { return this.#get().then((runner) => runner.followUp(prompt, images)); }
+  steer(prompt: string, images?: readonly ImageContent[]): Promise<void> { return this.#get().then((runner) => runner.steer(prompt, images)); }
+  clearQueues(): void { void this.#get().then((runner) => { runner.clearQueues(); }); }
+  queueSize(): number { return 0; }
+  abort(): Promise<void> { return this.#get().then((runner) => runner.abort()); }
+  compact(instructions?: string): Promise<void> { return this.#get().then((runner) => runner.compact(instructions)); }
+  newSession(): Promise<void> { return this.#get().then((runner) => runner.newSession()); }
+  dispose(): Promise<void> { return this.#runner?.then((runner) => runner.dispose()) ?? Promise.resolve(); }
+  #get(): Promise<PiRunner> {
+    this.#runner ??= this.#create().then((runner) => {
+      runner.onEvent((event) => { void this.emit(event); });
+      return runner;
+    });
+    return this.#runner;
+  }
+}
+
 export interface SdkPiRunnerOptions {
   jobId: string;
   cwd: string;

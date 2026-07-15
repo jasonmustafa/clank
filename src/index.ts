@@ -2,14 +2,14 @@ import { loadConfig } from "./config/index.js";
 import { startDiscordGateway } from "./discord/index.js";
 import { JobManager, JobStore, type Job } from "./jobs/index.js";
 import { JobController } from "./jobs/routing.js";
-import { FakeRunner } from "./pi-runners/index.js";
+import { LazyPiRunner, SdkPiRunner, type PiRunner } from "./pi-runners/index.js";
 import { AttachmentIngestor, DiscordAttachmentQueue, createDiscordAttachTool } from "./attachments/index.js";
 import { join } from "node:path";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { cleanupCompletedJobs, RunnerPool } from "./lifecycle/index.js";
 import { CasualController, SdkCasualRunner } from "./discord/casual.js";
 import { WorkspaceRegistry } from "./workspaces/index.js";
-import { ApprovalService } from "./safety/index.js";
+import { ApprovalService, commandSafetyPolicy } from "./safety/index.js";
 import { attachApprovalInteractionRouter, DiscordApprovalMessenger } from "./safety/discord.js";
 import { createSystemRequestService, GithubHelperClient, SystemHelperClient } from "./helpers/index.js";
 import { ResourceUpdater } from "./resources/index.js";
@@ -54,8 +54,27 @@ async function main(): Promise<void> {
     }
     return queue;
   };
-  const runnerPool = new RunnerPool<FakeRunner>((job) => new FakeRunner({ customTools: [createDiscordAttachTool(queueFor(job))] }), config.policy.lifecycle.runnerIdleTtlMs);
-  const runnerFor = (job: { id: string; workspacePath: string }): FakeRunner => runnerPool.get(job as Job);
+  const agentDir = "/srv/clank/pi-agent";
+  const settings = JSON.parse(await readFile(join(agentDir, "settings.json"), "utf8")) as {
+    defaultProvider?: string; defaultModel?: string; defaultThinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  };
+  if (settings.defaultProvider === undefined || settings.defaultModel === undefined) throw new Error("Pi default provider/model is not configured");
+  const defaultProvider = settings.defaultProvider;
+  const defaultModel = settings.defaultModel;
+  const runnerPool = new RunnerPool<PiRunner>((job) => new LazyPiRunner(() => SdkPiRunner.create({
+    jobId: job.id,
+    cwd: job.workspacePath,
+    agentDir,
+    sessionsDir: config.policy.paths.sessions,
+    model: { provider: defaultProvider, id: defaultModel },
+    thinkingLevel: settings.defaultThinkingLevel ?? "high",
+    customTools: [createDiscordAttachTool(queueFor(job))],
+    safety: {
+      ...commandSafetyPolicy({ workspaceRoot: job.workspacePath, protectedRoots: [agentDir, config.policy.paths.state, config.policy.paths.resources, "/srv/clank/config", "/usr/local/lib/clank"] }, job.profile, config.policy.safety),
+      confirm: () => Promise.resolve(false),
+    },
+  })), config.policy.lifecycle.runnerIdleTtlMs);
+  const runnerFor = (job: { id: string; workspacePath: string }): PiRunner => runnerPool.get(job as Job);
   const ingestor = new AttachmentIngestor({ temporaryRoot: config.policy.paths.temporary });
   const controller = new JobController(jobs.list(), runnerFor, undefined, async (job) => jobs.update(job), (job) => queueFor(job).take(), async (job) => {
     try { await access(job.workspacePath); return true; } catch (error) {
@@ -72,7 +91,6 @@ async function main(): Promise<void> {
   const deployment = new DeploymentManager(config.policy.deployment, config.policy.paths.state, new SpawnRunner(), async (requesterId) => helper.invoke({ action: "service-restart" }, { requesterId }));
   const client = await startDiscordGateway(config.secrets.discordToken, config.policy.discord, {
     jobs,
-    runner: new FakeRunner(),
     runnerForJob: runnerFor,
     workspaceRoot: config.policy.paths.workspaces,
     sessionRoot: config.policy.paths.sessions,
