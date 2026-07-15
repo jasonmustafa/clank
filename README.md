@@ -31,7 +31,8 @@ sudo install -d -o clank -g clank -m 0750 \
   /srv/clank/app /srv/clank/config /srv/clank/state \
   /srv/clank/workspaces/jobs /srv/clank/pi-sessions /srv/clank/tmp \
   /srv/clank/resources
-sudo install -d -o root -g clank -m 0750 /srv/clank/logs /etc/clank /srv/clank/pi-agent
+sudo install -d -o root -g clank -m 0750 /srv/clank/logs /etc/clank
+sudo install -d -o root -g clank -m 0770 /srv/clank/pi-agent
 ```
 
 Suggested layout:
@@ -39,7 +40,7 @@ Suggested layout:
 - `/srv/clank/app`: deploy checkout, owned by `clank` so the deploy workflow can fetch/reset/build it.
 - `/srv/clank/config/clank.config.json`: non-secret runtime policy (`0640 clank:clank`). Start from `config/clank.config.example.json`; use absolute `/srv/clank/...` paths.
 - `/srv/clank/state`, `workspaces/jobs`, `pi-sessions`, `tmp`: daemon-owned mutable data.
-- `/srv/clank/pi-agent`: trusted, operator-maintained Pi resources; do not let jobs modify it.
+- `/srv/clank/pi-agent`: trusted, operator-maintained Pi resources; do not let jobs modify it. The `clank` group needs directory write access because Pi's OAuth storage creates a sibling lock while refreshing `auth.json`; keep membership limited to the daemon account.
 - `/srv/clank/resources`: checkouts of explicitly trusted resource repositories configured by URL, ref, and resource globs. Review changes—especially extensions—before approval.
 - `/etc/clank/clank.env`: root-owned secrets (`0640 root:clank`).
 - `/usr/local/lib/clank`: root-owned helpers and their dedicated Node runtime.
