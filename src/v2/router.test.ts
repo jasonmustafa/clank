@@ -28,7 +28,7 @@ function harness() {
     updatePreview(channelId, content) { sent.push({ channelId, content, kind: "preview" }); return Promise.resolve(); },
     setTyping(channelId, active) { calls.push(`typing:${channelId}:${String(active)}`); return Promise.resolve(); },
   };
-  const router = new SuperuserRequestRouter({ superuserIds: ["owner-123"], privateChannelIds: ["private-channel"], defaultWorkingDirectory: "/srv/clank/app" }, discord, pi);
+  const router = new SuperuserRequestRouter({ superuserIds: ["owner-123"], privateChannelIds: ["private-channel"], defaultWorkingDirectoryAlias: "clank", workingDirectories: { clank: "/srv/clank/app", docs: "/srv/clank/docs" } }, discord, pi);
   return { router, calls, sessions, sent };
 }
 
@@ -40,6 +40,22 @@ describe("superuser task router", () => {
     expect(calls).toContain("create:message-1:/srv/clank/app");
     expect(sent).toContainEqual({ channelId: "thread-1", content: "answer:Inspect the checkout", kind: "preview" });
     expect(sent).toContainEqual({ channelId: "thread-1", content: "answer:Inspect the checkout", kind: "final" });
+  });
+
+  it("selects a configured working directory and strips the selector from the prompt", async () => {
+    const { router, calls } = harness();
+    await router.route(request({ content: "/in docs Update the guide" }));
+    expect(calls).toContain("create:message-1:/srv/clank/docs");
+    expect(calls).toContain("prompt:Update the guide");
+  });
+
+  it("rejects an unknown alias before creating a thread or Pi runtime", async () => {
+    const { router, calls, sent } = harness();
+    await expect(router.route(request({ location: "dm", guildId: null, channelId: "dm-1", content: "/in nowhere Do work" }))).resolves.toEqual({ kind: "ignored" });
+    await expect(router.route(request({ id: "prototype", location: "dm", guildId: null, channelId: "dm-2", content: "/in constructor Do work" }))).resolves.toEqual({ kind: "ignored" });
+    expect(calls.some((call) => call.startsWith("create:") || call.startsWith("thread:"))).toBe(false);
+    expect(sent[0]?.content).toContain("Unknown working-directory alias 'nowhere'");
+    expect(sent[1]?.content).toContain("Unknown working-directory alias 'constructor'");
   });
 
   it("continues, queues by default while busy, and explicitly steers one thread only", async () => {
@@ -60,7 +76,7 @@ describe("superuser task router", () => {
     for (const [id, content] of [["s", "/status"], ["x", "/stop"], ["c", "/compact"], ["r", "/reset"]] as const) {
       await router.route(request({ id, channelId: "thread-1", threadId: "thread-1", content }));
     }
-    expect(sent.some((entry) => entry.content.includes("session-1"))).toBe(true);
+    expect(sent.some((entry) => entry.content.includes("session-1") && entry.content.includes("clank (/srv/clank/app)"))).toBe(true);
     expect(calls).toEqual(expect.arrayContaining(["stop", "compact", "dispose"]));
     expect(sessions).toHaveLength(2);
   });
@@ -94,7 +110,7 @@ describe("durable superuser task routing", () => {
     const store: TaskStore = { load: () => Promise.resolve(structuredClone(state)), save: (next) => { state = structuredClone(next); return Promise.resolve(); } };
     const pi: SuperuserPiFactory = { create(options) { calls.push(`resume:${options.taskId}:${options.cwd}:${options.sessionId ?? "new"}`); return Promise.resolve({ prompt: (text) => Promise.resolve(`resumed:${text}`), followUp: () => Promise.resolve(), steer: () => Promise.resolve(), stop: () => Promise.resolve(), compact: () => Promise.resolve(), status: () => ({ busy: false, queued: 0, sessionId: "saved-session" }), dispose: () => Promise.resolve() }); } };
     const discord: DiscordTransport = { createThread: () => Promise.reject(new Error("unused")), send: (channelId, content, options) => { sent.push({ channelId, content, kind: options?.kind }); return Promise.resolve(); }, updatePreview: () => Promise.resolve(), setTyping: () => Promise.resolve() };
-    const router = new SuperuserRequestRouter({ superuserIds: ["owner-123"], privateChannelIds: ["private-channel"], defaultWorkingDirectory: "/default" }, discord, pi, store);
+    const router = new SuperuserRequestRouter({ superuserIds: ["owner-123"], privateChannelIds: ["private-channel"], defaultWorkingDirectoryAlias: "default", workingDirectories: { default: "/default" } }, discord, pi, store);
     await router.initialize(); await router.initialize();
     expect(state.tasks[0]?.lifecycleState).toBe("interrupted"); expect(state.approvals[0]?.status).toBe("expired");
     expect(sent.filter((entry) => entry.content.includes("interrupted"))).toHaveLength(1);

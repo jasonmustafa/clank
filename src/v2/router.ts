@@ -7,7 +7,7 @@ export type PiProgress = { kind: "text"; text: string } | { kind: "tool"; name: 
 export interface DiscordTransport { createThread(requestId: string, name: string): Promise<string>; send(channelId: string, content: string, options?: { kind?: "preview" | "status" | "final" }): Promise<void>; updatePreview(channelId: string, content: string): Promise<void>; setTyping(channelId: string, active: boolean): Promise<void>; }
 export interface SuperuserPiSession { prompt(prompt: string, onProgress?: (event: PiProgress) => void): Promise<string>; followUp(prompt: string): Promise<void>; steer(prompt: string): Promise<void>; stop(): Promise<void>; compact(): Promise<void>; status(): { busy: boolean; queued: number; sessionId: string }; dispose(): Promise<void>; }
 export interface SuperuserPiFactory { create(options: { taskId: string; cwd: string; sessionId?: string }): Promise<SuperuserPiSession>; }
-export interface SuperuserRoutingPolicy { superuserIds: readonly string[]; privateChannelIds: readonly string[]; defaultWorkingDirectory: string; }
+export interface SuperuserRoutingPolicy { superuserIds: readonly string[]; privateChannelIds: readonly string[]; defaultWorkingDirectoryAlias: string; workingDirectories: Readonly<Record<string, string>>; }
 export type RouteResult = { kind: "ignored" } | { kind: "accepted" | "completed"; taskId: string };
 interface Task { record: PersistedTask; session: SuperuserPiSession | undefined; generation: number; running: boolean; }
 
@@ -34,10 +34,12 @@ export class SuperuserRequestRouter {
     await this.initialize(); if (!this.#accepting || !this.#isAuthorized(request) || request.content.trim() === "") return { kind: "ignored" };
     const taskChannelId = request.threadId ?? (request.location === "dm" ? request.channelId : undefined); const existing = taskChannelId === undefined ? undefined : this.#tasks.get(taskChannelId);
     if (existing !== undefined) return this.#continue(existing, request); if (request.threadId !== null) return { kind: "ignored" };
-    const threadId = request.location === "guild" ? await this.#discord.createThread(request.id, makeTaskThreadName(request.id, request.content)) : request.channelId;
-    let session: SuperuserPiSession; try { session = await this.#pi.create({ taskId: request.id, cwd: this.#policy.defaultWorkingDirectory }); } catch (error) { await this.#discord.send(threadId, `Could not start task: ${error instanceof Error ? error.message : String(error)}`, { kind: "status" }); throw error; }
-    const now = new Date().toISOString(); const record: PersistedTask = { id: request.id, requesterId: request.userId, threadId, capabilityMode: "superuser", workingDirectory: this.#policy.defaultWorkingDirectory, lifecycleState: "idle", createdAt: now, updatedAt: now, piSessionId: session.status().sessionId };
-    const task: Task = { record, session, generation: 0, running: false }; this.#tasks.set(threadId, task); this.#state.tasks.push(record); await this.#persist(); return this.#startRun(task, request.content);
+    const selection = selectWorkingDirectory(request.content, this.#policy);
+    if (selection.error !== undefined) { await this.#discord.send(request.channelId, selection.error, { kind: "status" }); return { kind: "ignored" }; }
+    const threadId = request.location === "guild" ? await this.#discord.createThread(request.id, makeTaskThreadName(request.id, selection.prompt)) : request.channelId;
+    let session: SuperuserPiSession; try { session = await this.#pi.create({ taskId: request.id, cwd: selection.path }); } catch (error) { await this.#discord.send(threadId, `Could not start task: ${error instanceof Error ? error.message : String(error)}`, { kind: "status" }); throw error; }
+    const now = new Date().toISOString(); const record: PersistedTask = { id: request.id, requesterId: request.userId, threadId, capabilityMode: "superuser", workingDirectory: selection.path, lifecycleState: "idle", createdAt: now, updatedAt: now, piSessionId: session.status().sessionId };
+    const task: Task = { record, session, generation: 0, running: false }; this.#tasks.set(threadId, task); this.#state.tasks.push(record); await this.#persist(); return this.#startRun(task, selection.prompt);
   }
 
   async shutdown(): Promise<void> {
@@ -51,7 +53,7 @@ export class SuperuserRequestRouter {
   async #session(task: Task): Promise<SuperuserPiSession> { return task.session ??= await this.#pi.create({ taskId: task.record.id, cwd: task.record.workingDirectory, sessionId: task.record.piSessionId }); }
   async #continue(task: Task, request: DiscordRequest): Promise<RouteResult> {
     if (task.record.requesterId !== request.userId) return { kind: "ignored" }; const session = await this.#session(task); const text = request.content.trim(); const [command, ...rest] = text.split(/\s+/u);
-    if (command === "/status") { const state = session.status(); await this.#discord.send(task.record.threadId, `Task ${task.record.id}: ${state.busy ? "working" : "idle"}; ${String(state.queued)} queued; session ${state.sessionId}.`, { kind: "status" }); }
+    if (command === "/status") { const state = session.status(); const alias = Object.entries(this.#policy.workingDirectories).find(([, path]) => path === task.record.workingDirectory)?.[0] ?? "custom"; await this.#discord.send(task.record.threadId, `Task ${task.record.id}: ${state.busy ? "working" : "idle"}; ${String(state.queued)} queued; session ${state.sessionId}; directory ${alias} (${task.record.workingDirectory}).`, { kind: "status" }); }
     else if (command === "/stop") { await session.stop(); task.record.lifecycleState = "stopped"; await this.#discord.send(task.record.threadId, "Stopped active work and cleared queued messages.", { kind: "status" }); }
     else if (command === "/compact") { await session.compact(); await this.#discord.send(task.record.threadId, "Session context compacted.", { kind: "status" }); }
     else if (command === "/reset") { await session.stop(); await session.dispose(); task.session = await this.#pi.create({ taskId: task.record.id, cwd: task.record.workingDirectory }); task.record.piSessionId = task.session.status().sessionId; task.generation += 1; await this.#discord.send(task.record.threadId, "Task session reset.", { kind: "status" }); }
@@ -70,4 +72,13 @@ export class SuperuserRequestRouter {
   #persist(): Promise<void> { const store = this.#store; if (store === undefined) return Promise.resolve(); this.#saveQueue = this.#saveQueue.then(() => store.save(structuredClone(this.#state))); return this.#saveQueue; }
   #isAuthorized(request: DiscordRequest): boolean { if (request.authorIsBot || request.webhookId !== null || !this.#policy.superuserIds.includes(request.userId)) return false; return request.location === "dm" ? request.guildId === null : request.guildId !== null && (request.threadId !== null || this.#policy.privateChannelIds.includes(request.channelId)); }
 }
+function selectWorkingDirectory(content: string, policy: SuperuserRoutingPolicy): { path: string; prompt: string; error?: string } {
+  const match = /^\/in(?:\s+(\S+))?(?:\s+([\s\S]*))?$/u.exec(content.trim());
+  const alias = match?.[1] ?? policy.defaultWorkingDirectoryAlias;
+  const path = Object.hasOwn(policy.workingDirectories, alias) ? policy.workingDirectories[alias] : undefined;
+  if (match !== null && (match[1] === undefined || (match[2] ?? "").trim() === "")) return { path: "", prompt: "", error: "Usage: /in <working-directory-alias> <task>" };
+  if (path === undefined) return { path: "", prompt: "", error: `Unknown working-directory alias '${alias}'. Configured aliases: ${Object.keys(policy.workingDirectories).join(", ")}.` };
+  return { path, prompt: match?.[2]?.trim() ?? content };
+}
+
 export function makeTaskThreadName(taskId: string, content: string): string { const shortId = createHash("sha256").update(taskId).digest("hex").slice(0, 8); const concise = content.trim().split(/\s+/u).slice(0, 12).join(" "); const summary = concise.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/gu, "") || "task"; const suffix = ` — ${shortId}`; return `${summary.slice(0, 100 - suffix.length)}${suffix}`; }

@@ -9,7 +9,8 @@ export async function startV2(): Promise<void> {
   const gateway = await startV2DiscordGateway(config.secrets.discordToken, {
     superuserIds: config.policy.discord.superuserIds,
     privateChannelIds: config.policy.discord.privateChannelIds,
-    defaultWorkingDirectory: config.policy.pi.defaultWorkingDirectory,
+    defaultWorkingDirectoryAlias: config.policy.pi.defaultWorkingDirectoryAlias,
+    workingDirectories: config.policy.pi.workingDirectories,
   }, pi, new FileTaskStore(config.policy.lifecycle.taskStatePath));
   console.log(`clank v2 connected as ${gateway.client.user?.tag ?? "unknown user"}`);
   let shuttingDown = false;

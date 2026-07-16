@@ -14,7 +14,8 @@ export interface V2DiscordPolicy {
 export interface V2PiPolicy {
   agentDir: string;
   sessionsDirectory: string;
-  defaultWorkingDirectory: string;
+  defaultWorkingDirectoryAlias: string;
+  workingDirectories: Record<string, string>;
   model: { provider: string; id: string; thinkingLevel: ThinkingLevel };
 }
 
@@ -71,6 +72,11 @@ function validatePolicy(value: unknown, issues: string[]): V2Policy | undefined 
   const privateChannelIds = stringArray(discordValue.privateChannelIds, "discord.privateChannelIds", issues);
   const thinkingLevel = stringValue(modelValue.thinkingLevel, "pi.model.thinkingLevel", issues);
   if (!THINKING_LEVELS.includes(thinkingLevel as ThinkingLevel)) issues.push("pi.model.thinkingLevel must be a supported Pi thinking level");
+  const workingDirectories = absolutePathRecord(piValue.workingDirectories, "pi.workingDirectories", issues);
+  const defaultWorkingDirectoryAlias = stringValue(piValue.defaultWorkingDirectoryAlias, "pi.defaultWorkingDirectoryAlias", issues);
+  if (defaultWorkingDirectoryAlias !== "" && !Object.hasOwn(workingDirectories, defaultWorkingDirectoryAlias)) {
+    issues.push("pi.defaultWorkingDirectoryAlias must name a configured working directory");
+  }
 
   return {
     discord: {
@@ -82,7 +88,8 @@ function validatePolicy(value: unknown, issues: string[]): V2Policy | undefined 
     pi: {
       agentDir: absolutePath(piValue.agentDir, "pi.agentDir", issues),
       sessionsDirectory: absolutePath(piValue.sessionsDirectory, "pi.sessionsDirectory", issues),
-      defaultWorkingDirectory: absolutePath(piValue.defaultWorkingDirectory, "pi.defaultWorkingDirectory", issues),
+      defaultWorkingDirectoryAlias,
+      workingDirectories,
       model: {
         provider: stringValue(modelValue.provider, "pi.model.provider", issues),
         id: stringValue(modelValue.id, "pi.model.id", issues),
@@ -118,6 +125,18 @@ function stringArray(value: unknown, path: string, issues: string[]): string[] {
     return [];
   }
   return value as string[];
+}
+
+function absolutePathRecord(value: unknown, path: string, issues: string[]): Record<string, string> {
+  const object = objectValue(value, path, issues);
+  if (object === undefined) return {};
+  const result: Record<string, string> = {};
+  for (const [alias, candidate] of Object.entries(object)) {
+    if (alias.trim() === "" || /\s/u.test(alias) || alias === "__proto__") { issues.push(`${path} aliases must be non-empty, contain no whitespace, and not be reserved`); continue; }
+    result[alias] = absolutePath(candidate, `${path}.${alias}`, issues);
+  }
+  if (Object.keys(result).length === 0) issues.push(`${path} must contain at least one alias`);
+  return result;
 }
 
 function absolutePath(value: unknown, path: string, issues: string[]): string {

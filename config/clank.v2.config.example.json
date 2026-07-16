@@ -10,7 +10,11 @@
   "pi": {
     "agentDir": "/srv/clank/.pi/agent",
     "sessionsDirectory": "/srv/clank/pi-sessions-v2",
-    "defaultWorkingDirectory": "/srv/clank/app",
+    "defaultWorkingDirectoryAlias": "clank",
+    "workingDirectories": {
+      "clank": "/srv/clank/app",
+      "docs": "/srv/clank/docs"
+    },
     "model": {
       "provider": "<pi-provider>",
       "id": "<pi-model-id>",

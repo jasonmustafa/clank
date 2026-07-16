@@ -66,6 +66,23 @@ Replace every JSON placeholder and add `CLANK_DISCORD_TOKEN=...` to the environm
 
 Deployment-specific values are configuration, never source constants. This includes the Git identity (`commitAuthorName` and `commitAuthorEmail`), trusted resource repository URLs and refs, the generated-by commit footer, and helper secret/environment paths. Keep placeholder-only examples in Git and set real values in the deployment's ignored config or root-owned environment file.
 
+### Superuser v2 project and GitHub setup
+
+The v2 policy configures named working directories. `defaultWorkingDirectoryAlias` is used for an ordinary task; start a task elsewhere with `/in <alias> <task>`. Only aliases in `pi.workingDirectories` are accepted, and the resolved absolute path is saved with the task and shown by `/status`.
+
+V2 deliberately uses Pi's normal SDK resource loading. Configure settings, authentication, models, skills, extensions, prompt templates, and global context in `/srv/clank/.pi/agent`, and project resources in each checkout as for an interactive Pi installation. Review and trust projects while logged in as `clank`; Clank does not copy resources into a trusted staging area or implicitly trust a checkout.
+
+Configure ordinary Git, SSH, and GitHub CLI credentials as the service account. Commit identity and disclosure are deployment choices, not push policy:
+
+```sh
+sudo -u clank -H git config --global user.name '<deployment commit author>'
+sudo -u clank -H git config --global user.email '<deployment author email>'
+sudo -u clank -H ssh -T git@github.com                 # verify the deployed SSH key/agent
+sudo -u clank -H gh auth login                          # or provide standard gh authentication
+```
+
+Put the deployment's required generated-by trailer (for example, `Generated-by: Clank`) in the ordinary global `AGENTS.md` instructions. No Clank Git/GitHub bridge, command filter, commit hook, or push-policy helper is used by superuser sessions. Verify the deployment in a dedicated test repository by asking a v2 task to edit and check a branch, commit with the configured trailer, push, run `gh issue create`, and run `gh pr create`; never use the production repository for the first smoke test. The normal unit suite performs this workflow against a local bare Git remote and a fake `gh`, so it makes no live GitHub or SSH calls.
+
 ### Pi OpenAI subscription authentication
 
 Authenticate interactively as the service account so credentials are stored under its home, not root's or an administrator's:
