@@ -9,12 +9,15 @@ const policy = {
     applicationId: "app-id",
     superuserIds: ["owner-id"],
     privateChannelIds: ["private-channel"],
+    casual: { allowedGuildIds: ["guild"], allowedChannelIds: ["casual"], continuationTtlMs: 300_000, maxContinuationTurns: 3, userRateLimit: { requests: 5, windowMs: 60_000 }, guildRateLimit: { requests: 20, windowMs: 60_000 } },
   },
   lifecycle: { taskStatePath: "/srv/clank/state/v2-tasks.json" },
   attachments: { temporaryRoot: "/srv/clank/tmp/v2-attachments", maxCount: 10, maxInputBytesEach: 10_000, maxInputBytesTotal: 20_000, maxOutputBytesEach: 10_000, maxOutputCount: 10 },
   pi: {
     agentDir: "/srv/clank/.pi/agent",
     sessionsDirectory: "/srv/clank/pi-sessions-v2",
+    casualAgentDir: "/srv/clank/.pi/casual-agent",
+    casualIsolationDirectory: "/srv/clank/casual-isolation",
     defaultWorkingDirectoryAlias: "clank",
     workingDirectories: { clank: "/srv/clank/app", docs: "/srv/clank/docs" },
     model: { provider: "openai-codex", id: "gpt-5.4", thinkingLevel: "high" },
@@ -41,12 +44,14 @@ describe("v2 configuration", () => {
 
   it("rejects missing identities, relative paths, and invalid model settings without leaking secrets", async () => {
     const path = await configFile({
-      discord: { applicationId: "app-id", superuserIds: [], privateChannelIds: [] },
+      discord: { applicationId: "app-id", superuserIds: [], privateChannelIds: [], casual: { allowedGuildIds: [], allowedChannelIds: [], continuationTtlMs: 1, maxContinuationTurns: 1, userRateLimit: { requests: 1, windowMs: 1 }, guildRateLimit: { requests: 1, windowMs: 1 } } },
       lifecycle: { taskStatePath: "/state/tasks.json" },
       attachments: { temporaryRoot: "/tmp/attachments", maxCount: 10, maxInputBytesEach: 10_000, maxInputBytesTotal: 20_000, maxOutputBytesEach: 10_000, maxOutputCount: 10 },
       pi: {
         agentDir: "relative",
         sessionsDirectory: "/sessions",
+        casualAgentDir: "/casual-agent",
+        casualIsolationDirectory: "/casual",
         defaultWorkingDirectoryAlias: "missing",
         workingDirectories: { clank: "checkout" },
         model: { provider: "", id: "model", thinkingLevel: "extreme" },

@@ -5,12 +5,15 @@ import {
   createAgentSession,
   ModelRegistry,
   SessionManager,
+  SettingsManager,
+  DefaultResourceLoader,
   type CreateAgentSessionResult,
 } from "@earendil-works/pi-coding-agent";
 import { mkdir } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { createTaskDiscordAttachTool, type TaskAttachmentBridge } from "./attachments.js";
 import type { PiProgress, SuperuserPiFactory, SuperuserPiSession } from "./router.js";
+import type { CasualPiFactory, CasualPiSession } from "./casual.js";
 
 export interface SuperuserPiOptions {
   agentDir: string;
@@ -18,10 +21,45 @@ export interface SuperuserPiOptions {
   model: { provider: string; id: string; thinkingLevel: ThinkingLevel };
 }
 
+export interface CasualPiOptions {
+  agentDir: string;
+  isolationDirectory: string;
+  model: { provider: string; id: string; thinkingLevel: ThinkingLevel };
+}
+
 export interface ConstructedSuperuserPiSession {
   result: CreateAgentSessionResult;
   cwd: string;
   sessionDirectory: string;
+}
+
+export class SdkCasualPiFactory implements CasualPiFactory {
+  constructor(readonly options: CasualPiOptions) {}
+  async create(): Promise<CasualPiSession> {
+    const { result } = await constructCasualPiSession(this.options);
+    return new SdkCasualPiSession(result);
+  }
+}
+class SdkCasualPiSession implements CasualPiSession {
+  constructor(readonly result: CreateAgentSessionResult) {}
+  async prompt(prompt: string): Promise<string> {
+    let text = ""; const unsubscribe = this.result.session.subscribe((event) => { if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") text += event.assistantMessageEvent.delta; });
+    try { await this.result.session.prompt(prompt); return text; } finally { unsubscribe(); }
+  }
+  dispose(): Promise<void> { this.result.session.dispose(); return Promise.resolve(); }
+}
+
+export async function constructCasualPiSession(config: CasualPiOptions): Promise<{ result: CreateAgentSessionResult }> {
+  await mkdir(config.isolationDirectory, { recursive: true });
+  const authStorage = AuthStorage.create(join(config.agentDir, "auth.json"));
+  const modelRegistry = ModelRegistry.create(authStorage, join(config.agentDir, "models.json"));
+  const model = modelRegistry.find(config.model.provider, config.model.id);
+  if (model === undefined) throw new Error(`Pi model not found: ${config.model.provider}/${config.model.id}`);
+  const settingsManager = SettingsManager.inMemory();
+  const resourceLoader = new DefaultResourceLoader({ cwd: config.isolationDirectory, agentDir: config.isolationDirectory, settingsManager, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true });
+  await resourceLoader.reload();
+  const result = await createAgentSession({ cwd: config.isolationDirectory, agentDir: config.isolationDirectory, authStorage, modelRegistry, model, thinkingLevel: config.model.thinkingLevel, settingsManager, resourceLoader, sessionManager: SessionManager.inMemory(config.isolationDirectory), noTools: "all", tools: [], customTools: [] });
+  return { result };
 }
 
 export class SdkSuperuserPiSession implements SuperuserPiSession {

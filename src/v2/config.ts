@@ -9,11 +9,14 @@ export interface V2DiscordPolicy {
   applicationId: string;
   superuserIds: string[];
   privateChannelIds: string[];
+  casual: { allowedGuildIds: string[]; allowedChannelIds: string[]; continuationTtlMs: number; maxContinuationTurns: number; userRateLimit: { requests: number; windowMs: number }; guildRateLimit: { requests: number; windowMs: number } };
 }
 
 export interface V2PiPolicy {
   agentDir: string;
   sessionsDirectory: string;
+  casualAgentDir: string;
+  casualIsolationDirectory: string;
   defaultWorkingDirectoryAlias: string;
   workingDirectories: Record<string, string>;
   model: { provider: string; id: string; thinkingLevel: ThinkingLevel };
@@ -65,9 +68,12 @@ function validatePolicy(value: unknown, issues: string[]): V2Policy | undefined 
   const discordValue = objectValue(root?.discord, "discord", issues);
   const piValue = objectValue(root?.pi, "pi", issues);
   const modelValue = objectValue(piValue?.model, "pi.model", issues);
+  const casualValue = objectValue(discordValue?.casual, "discord.casual", issues);
+  const userRateValue = objectValue(casualValue?.userRateLimit, "discord.casual.userRateLimit", issues);
+  const guildRateValue = objectValue(casualValue?.guildRateLimit, "discord.casual.guildRateLimit", issues);
   const lifecycleValue = objectValue(root?.lifecycle, "lifecycle", issues);
   const attachmentsValue = objectValue(root?.attachments, "attachments", issues);
-  if (root === undefined || discordValue === undefined || piValue === undefined || modelValue === undefined || lifecycleValue === undefined || attachmentsValue === undefined) return undefined;
+  if (root === undefined || discordValue === undefined || piValue === undefined || modelValue === undefined || casualValue === undefined || userRateValue === undefined || guildRateValue === undefined || lifecycleValue === undefined || attachmentsValue === undefined) return undefined;
 
   const superuserIds = stringArray(discordValue.superuserIds, "discord.superuserIds", issues);
   if (superuserIds.length === 0) issues.push("discord.superuserIds must contain at least one immutable Discord user ID");
@@ -85,6 +91,14 @@ function validatePolicy(value: unknown, issues: string[]): V2Policy | undefined 
       applicationId: stringValue(discordValue.applicationId, "discord.applicationId", issues),
       superuserIds,
       privateChannelIds,
+      casual: {
+        allowedGuildIds: stringArray(casualValue.allowedGuildIds, "discord.casual.allowedGuildIds", issues),
+        allowedChannelIds: stringArray(casualValue.allowedChannelIds, "discord.casual.allowedChannelIds", issues),
+        continuationTtlMs: positiveInteger(casualValue.continuationTtlMs, "discord.casual.continuationTtlMs", issues),
+        maxContinuationTurns: positiveInteger(casualValue.maxContinuationTurns, "discord.casual.maxContinuationTurns", issues),
+        userRateLimit: { requests: positiveInteger(userRateValue.requests, "discord.casual.userRateLimit.requests", issues), windowMs: positiveInteger(userRateValue.windowMs, "discord.casual.userRateLimit.windowMs", issues) },
+        guildRateLimit: { requests: positiveInteger(guildRateValue.requests, "discord.casual.guildRateLimit.requests", issues), windowMs: positiveInteger(guildRateValue.windowMs, "discord.casual.guildRateLimit.windowMs", issues) },
+      },
     },
     lifecycle: { taskStatePath: absolutePath(lifecycleValue.taskStatePath, "lifecycle.taskStatePath", issues) },
     attachments: {
@@ -98,6 +112,8 @@ function validatePolicy(value: unknown, issues: string[]): V2Policy | undefined 
     pi: {
       agentDir: absolutePath(piValue.agentDir, "pi.agentDir", issues),
       sessionsDirectory: absolutePath(piValue.sessionsDirectory, "pi.sessionsDirectory", issues),
+      casualAgentDir: absolutePath(piValue.casualAgentDir, "pi.casualAgentDir", issues),
+      casualIsolationDirectory: absolutePath(piValue.casualIsolationDirectory, "pi.casualIsolationDirectory", issues),
       defaultWorkingDirectoryAlias,
       workingDirectories,
       model: {

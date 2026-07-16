@@ -2,7 +2,15 @@
   "discord": {
     "applicationId": "<discord-application-id>",
     "superuserIds": ["<immutable-discord-user-id>"],
-    "privateChannelIds": ["<private-discord-channel-id>"]
+    "privateChannelIds": ["<private-discord-channel-id>"],
+    "casual": {
+      "allowedGuildIds": ["<casual-guild-id>"],
+      "allowedChannelIds": ["<casual-channel-id>"],
+      "continuationTtlMs": 300000,
+      "maxContinuationTurns": 3,
+      "userRateLimit": { "requests": 5, "windowMs": 60000 },
+      "guildRateLimit": { "requests": 20, "windowMs": 60000 }
+    }
   },
   "lifecycle": {
     "taskStatePath": "/srv/clank/state/v2-tasks.json"
@@ -18,6 +26,8 @@
   "pi": {
     "agentDir": "/srv/clank/.pi/agent",
     "sessionsDirectory": "/srv/clank/pi-sessions-v2",
+    "casualAgentDir": "/srv/clank/.pi/casual-agent",
+    "casualIsolationDirectory": "/srv/clank/casual-isolation",
     "defaultWorkingDirectoryAlias": "clank",
     "workingDirectories": {
       "clank": "/srv/clank/app",

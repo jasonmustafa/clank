@@ -7,7 +7,7 @@ import { SuperuserRequestRouter, makeTaskThreadName, type DiscordRequest, type D
 import type { PersistedTaskState, TaskStore } from "./task-store.js";
 
 function request(overrides: Partial<DiscordRequest> = {}): DiscordRequest {
-  return { id: "message-1", userId: "owner-123", channelId: "private-channel", threadId: null, guildId: "guild-1", location: "guild", content: "Inspect the checkout", attachments: [], authorIsBot: false, webhookId: null, ...overrides };
+  return { id: "message-1", userId: "owner-123", channelId: "private-channel", threadId: null, guildId: "guild-1", location: "guild", content: "Inspect the checkout", attachments: [], authorIsBot: false, webhookId: null, replyToMessageId: null, mentionsApplication: false, ...overrides };
 }
 
 function harness() {
@@ -28,7 +28,7 @@ function harness() {
   let threadCount = 0;
   const discord: DiscordTransport = {
     createThread(_requestId, name) { calls.push(`thread:${name}`); threadCount += 1; return Promise.resolve(`thread-${String(threadCount)}`); },
-    send(channelId, content, options) { sent.push({ channelId, content, kind: options?.kind }); return Promise.resolve(); },
+    send(channelId, content, options) { sent.push({ channelId, content, kind: options?.kind }); return Promise.resolve(undefined); },
     updatePreview(channelId, content) { sent.push({ channelId, content, kind: "preview" }); return Promise.resolve(); },
     setTyping(channelId, active) { calls.push(`typing:${channelId}:${String(active)}`); return Promise.resolve(); },
   };
@@ -100,7 +100,7 @@ describe("superuser task router", () => {
   it("forwards task-scoped text/images, returns approved outputs, and cleans input", async () => {
     const root = await mkdtemp(join(tmpdir(), "clank-router-attachments-")); const bridge = new TaskAttachmentBridge({ temporaryRoot: root, maxOutputBytesEach: 100 }); let receivedPrompt = ""; let imageCount = 0;
     const pi: SuperuserPiFactory = { async create({ taskId }) { const output = bridge.outputFor(taskId); await mkdir(output.directory, { recursive: true }); const report = join(output.directory, "report.txt"); await writeFile(report, "done"); return { async prompt(text, images) { receivedPrompt = text; imageCount = images?.length ?? 0; await output.enqueue(report); return "finished"; }, followUp: () => Promise.resolve(), steer: () => Promise.resolve(), stop: () => Promise.resolve(), compact: () => Promise.resolve(), status: () => ({ busy: false, queued: 0, sessionId: "s" }), dispose: () => Promise.resolve() }; } };
-    const sent: { content: string; files?: readonly string[] }[] = []; const discord: DiscordTransport = { createThread: () => Promise.resolve("thread"), send: (_channel, content, options) => { sent.push({ content, ...(options?.files === undefined ? {} : { files: options.files }) }); return Promise.resolve(); }, updatePreview: () => Promise.resolve(), setTyping: () => Promise.resolve() };
+    const sent: { content: string; files?: readonly string[] }[] = []; const discord: DiscordTransport = { createThread: () => Promise.resolve("thread"), send: (_channel, content, options) => { sent.push({ content, ...(options?.files === undefined ? {} : { files: options.files }) }); return Promise.resolve(undefined); }, updatePreview: () => Promise.resolve(), setTyping: () => Promise.resolve() };
     const router = new SuperuserRequestRouter({ superuserIds: ["owner-123"], privateChannelIds: ["private-channel"], defaultWorkingDirectoryAlias: "clank", workingDirectories: { clank: "/work" } }, discord, pi, undefined, bridge);
     await router.route(request({ attachments: [{ name: "../note.txt", url: "data:text/plain,hello", size: 5, contentType: "text/plain" }, { name: "pic.png", url: "data:image/png;base64,AQID", size: 3, contentType: "image/png" }] }));
     expect(receivedPrompt).toContain(join(root, "message-1", "input", "message-1", "note.txt")); expect(imageCount).toBe(1); expect(sent.at(-1)?.files?.[0]).toBe(join(root, "message-1", "output", "report.txt"));
@@ -123,7 +123,7 @@ describe("durable superuser task routing", () => {
     let state: PersistedTaskState = { version: 1, tasks: [{ id: "old-task", requesterId: "owner-123", threadId: "old-thread", capabilityMode: "superuser", workingDirectory: "/work/original", lifecycleState: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:01:00.000Z", piSessionId: "saved-session" }], approvals: [{ id: "approval-1", taskId: "old-task", status: "pending", expiresAt: "2099-01-01T00:00:00.000Z" }] };
     const store: TaskStore = { load: () => Promise.resolve(structuredClone(state)), save: (next) => { state = structuredClone(next); return Promise.resolve(); } };
     const pi: SuperuserPiFactory = { create(options) { calls.push(`resume:${options.taskId}:${options.cwd}:${options.sessionId ?? "new"}`); return Promise.resolve({ prompt: (text) => Promise.resolve(`resumed:${text}`), followUp: () => Promise.resolve(), steer: () => Promise.resolve(), stop: () => Promise.resolve(), compact: () => Promise.resolve(), status: () => ({ busy: false, queued: 0, sessionId: "saved-session" }), dispose: () => Promise.resolve() }); } };
-    const discord: DiscordTransport = { createThread: () => Promise.reject(new Error("unused")), send: (channelId, content, options) => { sent.push({ channelId, content, kind: options?.kind }); return Promise.resolve(); }, updatePreview: () => Promise.resolve(), setTyping: () => Promise.resolve() };
+    const discord: DiscordTransport = { createThread: () => Promise.reject(new Error("unused")), send: (channelId, content, options) => { sent.push({ channelId, content, kind: options?.kind }); return Promise.resolve(undefined); }, updatePreview: () => Promise.resolve(), setTyping: () => Promise.resolve() };
     const router = new SuperuserRequestRouter({ superuserIds: ["owner-123"], privateChannelIds: ["private-channel"], defaultWorkingDirectoryAlias: "default", workingDirectories: { default: "/default" } }, discord, pi, store);
     await router.initialize(); await router.initialize();
     expect(state.tasks[0]?.lifecycleState).toBe("interrupted"); expect(state.approvals[0]?.status).toBe("expired");
