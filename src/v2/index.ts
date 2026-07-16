@@ -2,16 +2,18 @@ import { loadV2Config } from "./config.js";
 import { startV2DiscordGateway } from "./discord.js";
 import { SdkSuperuserPiFactory } from "./pi.js";
 import { FileTaskStore } from "./task-store.js";
+import { TaskAttachmentBridge } from "./attachments.js";
 
 export async function startV2(): Promise<void> {
   const config = await loadV2Config();
-  const pi = new SdkSuperuserPiFactory(config.policy.pi);
+  const attachments = new TaskAttachmentBridge(config.policy.attachments);
+  const pi = new SdkSuperuserPiFactory(config.policy.pi, attachments);
   const gateway = await startV2DiscordGateway(config.secrets.discordToken, {
     superuserIds: config.policy.discord.superuserIds,
     privateChannelIds: config.policy.discord.privateChannelIds,
     defaultWorkingDirectoryAlias: config.policy.pi.defaultWorkingDirectoryAlias,
     workingDirectories: config.policy.pi.workingDirectories,
-  }, pi, new FileTaskStore(config.policy.lifecycle.taskStatePath));
+  }, pi, new FileTaskStore(config.policy.lifecycle.taskStatePath), attachments);
   console.log(`clank v2 connected as ${gateway.client.user?.tag ?? "unknown user"}`);
   let shuttingDown = false;
   const shutdown = () => { if (shuttingDown) return; shuttingDown = true; void gateway.shutdown().then(() => { process.exitCode = 0; }).catch((error: unknown) => { console.error(`clank v2 shutdown failed: ${error instanceof Error ? error.message : String(error)}`); process.exitCode = 1; }); };

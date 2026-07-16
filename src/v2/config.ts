@@ -23,6 +23,7 @@ export interface V2Policy {
   discord: V2DiscordPolicy;
   pi: V2PiPolicy;
   lifecycle: { taskStatePath: string };
+  attachments: { temporaryRoot: string; maxCount: number; maxInputBytesEach: number; maxInputBytesTotal: number; maxOutputBytesEach: number; maxOutputCount: number };
 }
 
 export interface V2RuntimeConfig {
@@ -65,7 +66,8 @@ function validatePolicy(value: unknown, issues: string[]): V2Policy | undefined 
   const piValue = objectValue(root?.pi, "pi", issues);
   const modelValue = objectValue(piValue?.model, "pi.model", issues);
   const lifecycleValue = objectValue(root?.lifecycle, "lifecycle", issues);
-  if (root === undefined || discordValue === undefined || piValue === undefined || modelValue === undefined || lifecycleValue === undefined) return undefined;
+  const attachmentsValue = objectValue(root?.attachments, "attachments", issues);
+  if (root === undefined || discordValue === undefined || piValue === undefined || modelValue === undefined || lifecycleValue === undefined || attachmentsValue === undefined) return undefined;
 
   const superuserIds = stringArray(discordValue.superuserIds, "discord.superuserIds", issues);
   if (superuserIds.length === 0) issues.push("discord.superuserIds must contain at least one immutable Discord user ID");
@@ -85,6 +87,14 @@ function validatePolicy(value: unknown, issues: string[]): V2Policy | undefined 
       privateChannelIds,
     },
     lifecycle: { taskStatePath: absolutePath(lifecycleValue.taskStatePath, "lifecycle.taskStatePath", issues) },
+    attachments: {
+      temporaryRoot: absolutePath(attachmentsValue.temporaryRoot, "attachments.temporaryRoot", issues),
+      maxCount: positiveInteger(attachmentsValue.maxCount, "attachments.maxCount", issues),
+      maxInputBytesEach: positiveInteger(attachmentsValue.maxInputBytesEach, "attachments.maxInputBytesEach", issues),
+      maxInputBytesTotal: positiveInteger(attachmentsValue.maxInputBytesTotal, "attachments.maxInputBytesTotal", issues),
+      maxOutputBytesEach: boundedPositiveInteger(attachmentsValue.maxOutputBytesEach, "attachments.maxOutputBytesEach", 10 * 1024 * 1024, issues),
+      maxOutputCount: boundedPositiveInteger(attachmentsValue.maxOutputCount, "attachments.maxOutputCount", 10, issues),
+    },
     pi: {
       agentDir: absolutePath(piValue.agentDir, "pi.agentDir", issues),
       sessionsDirectory: absolutePath(piValue.sessionsDirectory, "pi.sessionsDirectory", issues),
@@ -138,6 +148,9 @@ function absolutePathRecord(value: unknown, path: string, issues: string[]): Rec
   if (Object.keys(result).length === 0) issues.push(`${path} must contain at least one alias`);
   return result;
 }
+
+function positiveInteger(value: unknown, path: string, issues: string[]): number { if (!Number.isSafeInteger(value) || (value as number) <= 0) { issues.push(`${path} must be a positive integer`); return 1; } return value as number; }
+function boundedPositiveInteger(value: unknown, path: string, maximum: number, issues: string[]): number { const result = positiveInteger(value, path, issues); if (result > maximum) { issues.push(`${path} must not exceed ${String(maximum)}`); return maximum; } return result; }
 
 function absolutePath(value: unknown, path: string, issues: string[]): string {
   const result = stringValue(value, path, issues);

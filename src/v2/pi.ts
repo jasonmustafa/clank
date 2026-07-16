@@ -1,4 +1,5 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import {
   AuthStorage,
   createAgentSession,
@@ -8,6 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { mkdir } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
+import { createTaskDiscordAttachTool, type TaskAttachmentBridge } from "./attachments.js";
 import type { PiProgress, SuperuserPiFactory, SuperuserPiSession } from "./router.js";
 
 export interface SuperuserPiOptions {
@@ -29,7 +31,7 @@ export class SdkSuperuserPiSession implements SuperuserPiSession {
     this.#result = result;
   }
 
-  async prompt(prompt: string, onProgress?: (event: PiProgress) => void): Promise<string> {
+  async prompt(prompt: string, images?: readonly ImageContent[], onProgress?: (event: PiProgress) => void): Promise<string> {
     let text = "";
     const unsubscribe = this.#result.session.subscribe((event) => {
       if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
@@ -42,13 +44,13 @@ export class SdkSuperuserPiSession implements SuperuserPiSession {
       }
     });
     try {
-      await this.#result.session.prompt(prompt);
+      await this.#result.session.prompt(prompt, { images: [...(images ?? [])] });
       return text;
     } finally { unsubscribe(); }
   }
 
-  followUp(prompt: string): Promise<void> { return this.#result.session.followUp(prompt); }
-  steer(prompt: string): Promise<void> { return this.#result.session.steer(prompt); }
+  followUp(prompt: string, images?: readonly ImageContent[]): Promise<void> { return this.#result.session.followUp(prompt, [...(images ?? [])]); }
+  steer(prompt: string, images?: readonly ImageContent[]): Promise<void> { return this.#result.session.steer(prompt, [...(images ?? [])]); }
   async stop(): Promise<void> { this.#result.session.clearQueue(); await this.#result.session.abort(); }
   async compact(): Promise<void> { await this.#result.session.compact(); }
   status() {
@@ -58,14 +60,14 @@ export class SdkSuperuserPiSession implements SuperuserPiSession {
 }
 
 export class SdkSuperuserPiFactory implements SuperuserPiFactory {
-  readonly #options: SuperuserPiOptions;
+  readonly #options: SuperuserPiOptions; readonly #attachments: TaskAttachmentBridge | undefined;
 
-  constructor(options: SuperuserPiOptions) {
-    this.#options = options;
+  constructor(options: SuperuserPiOptions, attachments?: TaskAttachmentBridge) {
+    this.#options = options; this.#attachments = attachments;
   }
 
   async create(options: { taskId: string; cwd: string; sessionId?: string }): Promise<SdkSuperuserPiSession> {
-    const constructed = await constructSuperuserPiSession(this.#options, options);
+    const constructed = await constructSuperuserPiSession(this.#options, options, this.#attachments);
     return new SdkSuperuserPiSession(constructed.result);
   }
 }
@@ -73,6 +75,7 @@ export class SdkSuperuserPiFactory implements SuperuserPiFactory {
 export async function constructSuperuserPiSession(
   config: SuperuserPiOptions,
   task: { taskId: string; cwd: string; sessionId?: string },
+  attachments?: TaskAttachmentBridge,
 ): Promise<ConstructedSuperuserPiSession> {
   const sessionDirectory = taskSessionDirectory(config.sessionsDirectory, task.taskId);
   await mkdir(sessionDirectory, { recursive: true });
@@ -88,6 +91,7 @@ export async function constructSuperuserPiSession(
     model,
     thinkingLevel: config.model.thinkingLevel,
     sessionManager: sessionManagerForTask(task.cwd, sessionDirectory, task.sessionId),
+    ...(attachments === undefined ? {} : { customTools: [createTaskDiscordAttachTool(attachments.outputFor(task.taskId))] }),
   });
   return { result, cwd: task.cwd, sessionDirectory };
 }

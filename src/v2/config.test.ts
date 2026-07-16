@@ -11,6 +11,7 @@ const policy = {
     privateChannelIds: ["private-channel"],
   },
   lifecycle: { taskStatePath: "/srv/clank/state/v2-tasks.json" },
+  attachments: { temporaryRoot: "/srv/clank/tmp/v2-attachments", maxCount: 10, maxInputBytesEach: 10_000, maxInputBytesTotal: 20_000, maxOutputBytesEach: 10_000, maxOutputCount: 10 },
   pi: {
     agentDir: "/srv/clank/.pi/agent",
     sessionsDirectory: "/srv/clank/pi-sessions-v2",
@@ -42,6 +43,7 @@ describe("v2 configuration", () => {
     const path = await configFile({
       discord: { applicationId: "app-id", superuserIds: [], privateChannelIds: [] },
       lifecycle: { taskStatePath: "/state/tasks.json" },
+      attachments: { temporaryRoot: "/tmp/attachments", maxCount: 10, maxInputBytesEach: 10_000, maxInputBytesTotal: 20_000, maxOutputBytesEach: 10_000, maxOutputCount: 10 },
       pi: {
         agentDir: "relative",
         sessionsDirectory: "/sessions",

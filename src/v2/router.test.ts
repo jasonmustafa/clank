@@ -1,9 +1,13 @@
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { TaskAttachmentBridge } from "./attachments.js";
 import { SuperuserRequestRouter, makeTaskThreadName, type DiscordRequest, type DiscordTransport, type PiProgress, type SuperuserPiFactory, type SuperuserPiSession } from "./router.js";
 import type { PersistedTaskState, TaskStore } from "./task-store.js";
 
 function request(overrides: Partial<DiscordRequest> = {}): DiscordRequest {
-  return { id: "message-1", userId: "owner-123", channelId: "private-channel", threadId: null, guildId: "guild-1", location: "guild", content: "Inspect the checkout", authorIsBot: false, webhookId: null, ...overrides };
+  return { id: "message-1", userId: "owner-123", channelId: "private-channel", threadId: null, guildId: "guild-1", location: "guild", content: "Inspect the checkout", attachments: [], authorIsBot: false, webhookId: null, ...overrides };
 }
 
 function harness() {
@@ -11,7 +15,7 @@ function harness() {
   const sessions: FakeSession[] = [];
   class FakeSession implements SuperuserPiSession {
     busy = false;
-    prompt(text: string, onProgress?: (event: PiProgress) => void) { calls.push(`prompt:${text}`); this.busy = true; onProgress?.({ kind: "text", text: `answer:${text}` }); return Promise.resolve(`answer:${text}`).finally(() => { this.busy = false; }); }
+    prompt(text: string, _images?: readonly import("@earendil-works/pi-ai").ImageContent[], onProgress?: (event: PiProgress) => void) { calls.push(`prompt:${text}`); this.busy = true; onProgress?.({ kind: "text", text: `answer:${text}` }); return Promise.resolve(`answer:${text}`).finally(() => { this.busy = false; }); }
     followUp(text: string) { calls.push(`follow:${text}`); return Promise.resolve(); }
     steer(text: string) { calls.push(`steer:${text}`); return Promise.resolve(); }
     stop() { calls.push("stop"); this.busy = false; return Promise.resolve(); }
@@ -91,6 +95,16 @@ describe("superuser task router", () => {
     const first = sessions[0]; const second = sessions[1];
     if (first === undefined || second === undefined) throw new Error("sessions not created");
     expect(first.status().sessionId).not.toBe(second.status().sessionId);
+  });
+
+  it("forwards task-scoped text/images, returns approved outputs, and cleans input", async () => {
+    const root = await mkdtemp(join(tmpdir(), "clank-router-attachments-")); const bridge = new TaskAttachmentBridge({ temporaryRoot: root, maxOutputBytesEach: 100 }); let receivedPrompt = ""; let imageCount = 0;
+    const pi: SuperuserPiFactory = { async create({ taskId }) { const output = bridge.outputFor(taskId); await mkdir(output.directory, { recursive: true }); const report = join(output.directory, "report.txt"); await writeFile(report, "done"); return { async prompt(text, images) { receivedPrompt = text; imageCount = images?.length ?? 0; await output.enqueue(report); return "finished"; }, followUp: () => Promise.resolve(), steer: () => Promise.resolve(), stop: () => Promise.resolve(), compact: () => Promise.resolve(), status: () => ({ busy: false, queued: 0, sessionId: "s" }), dispose: () => Promise.resolve() }; } };
+    const sent: { content: string; files?: readonly string[] }[] = []; const discord: DiscordTransport = { createThread: () => Promise.resolve("thread"), send: (_channel, content, options) => { sent.push({ content, ...(options?.files === undefined ? {} : { files: options.files }) }); return Promise.resolve(); }, updatePreview: () => Promise.resolve(), setTyping: () => Promise.resolve() };
+    const router = new SuperuserRequestRouter({ superuserIds: ["owner-123"], privateChannelIds: ["private-channel"], defaultWorkingDirectoryAlias: "clank", workingDirectories: { clank: "/work" } }, discord, pi, undefined, bridge);
+    await router.route(request({ attachments: [{ name: "../note.txt", url: "data:text/plain,hello", size: 5, contentType: "text/plain" }, { name: "pic.png", url: "data:image/png;base64,AQID", size: 3, contentType: "image/png" }] }));
+    expect(receivedPrompt).toContain(join(root, "message-1", "input", "message-1", "note.txt")); expect(imageCount).toBe(1); expect(sent.at(-1)?.files?.[0]).toBe(join(root, "message-1", "output", "report.txt"));
+    await expect(readFile(join(root, "message-1", "input", "message-1", "note.txt"))).rejects.toThrow();
   });
 
   it("rejects unauthorized continuations as well as top-level requests", async () => {

@@ -7,6 +7,14 @@
   "lifecycle": {
     "taskStatePath": "/srv/clank/state/v2-tasks.json"
   },
+  "attachments": {
+    "temporaryRoot": "/srv/clank/tmp/v2-attachments",
+    "maxCount": 10,
+    "maxInputBytesEach": 10485760,
+    "maxInputBytesTotal": 26214400,
+    "maxOutputBytesEach": 10485760,
+    "maxOutputCount": 10
+  },
   "pi": {
     "agentDir": "/srv/clank/.pi/agent",
     "sessionsDirectory": "/srv/clank/pi-sessions-v2",
