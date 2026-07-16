@@ -8,7 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { mkdir } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
-import type { SuperuserPiFactory, SuperuserPiSession } from "./router.js";
+import type { PiProgress, SuperuserPiFactory, SuperuserPiSession } from "./router.js";
 
 export interface SuperuserPiOptions {
   agentDir: string;
@@ -29,25 +29,32 @@ export class SdkSuperuserPiSession implements SuperuserPiSession {
     this.#result = result;
   }
 
-  async prompt(prompt: string): Promise<string> {
+  async prompt(prompt: string, onProgress?: (event: PiProgress) => void): Promise<string> {
     let text = "";
     const unsubscribe = this.#result.session.subscribe((event) => {
       if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
         text += event.assistantMessageEvent.delta;
+        onProgress?.({ kind: "text", text: event.assistantMessageEvent.delta });
+      } else if (event.type === "tool_execution_start") {
+        onProgress?.({ kind: "tool", name: event.toolName, status: "started" });
+      } else if (event.type === "tool_execution_end") {
+        onProgress?.({ kind: "tool", name: event.toolName, status: "completed" });
       }
     });
     try {
       await this.#result.session.prompt(prompt);
       return text;
-    } finally {
-      unsubscribe();
-    }
+    } finally { unsubscribe(); }
   }
 
-  dispose(): Promise<void> {
-    this.#result.session.dispose();
-    return Promise.resolve();
+  followUp(prompt: string): Promise<void> { return this.#result.session.followUp(prompt); }
+  steer(prompt: string): Promise<void> { return this.#result.session.steer(prompt); }
+  async stop(): Promise<void> { this.#result.session.clearQueue(); await this.#result.session.abort(); }
+  async compact(): Promise<void> { await this.#result.session.compact(); }
+  status() {
+    return { busy: !this.#result.session.isIdle, queued: this.#result.session.pendingMessageCount, sessionId: this.#result.session.sessionId };
   }
+  dispose(): Promise<void> { this.#result.session.dispose(); return Promise.resolve(); }
 }
 
 export class SdkSuperuserPiFactory implements SuperuserPiFactory {
