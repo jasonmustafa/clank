@@ -1,6 +1,7 @@
 import { Client, GatewayIntentBits, Partials, type Message } from "discord.js";
 import { chunkDiscordMessage } from "../formatting/index.js";
 import { SuperuserRequestRouter, type DiscordRequest, type DiscordTransport, type SuperuserPiFactory, type SuperuserRoutingPolicy } from "./router.js";
+import type { TaskStore } from "./task-store.js";
 
 export interface DiscordMessageLike {
   id: string; author: { id: string; bot: boolean }; channelId: string; guildId: string | null; content: string; webhookId: string | null;
@@ -48,12 +49,14 @@ class DiscordJsTransport implements DiscordTransport {
   }
 }
 export function createV2DiscordClient(): Client { return new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent], partials: [Partials.Channel] }); }
-export async function startV2DiscordGateway(discordToken: string, policy: SuperuserRoutingPolicy, pi: SuperuserPiFactory): Promise<Client> {
-  const client = createV2DiscordClient(); const transport = new DiscordJsTransport(client); const router = new SuperuserRequestRouter(policy, transport, pi);
+export interface V2DiscordGateway { client: Client; shutdown(): Promise<void>; }
+export async function startV2DiscordGateway(discordToken: string, policy: SuperuserRoutingPolicy, pi: SuperuserPiFactory, store?: TaskStore): Promise<V2DiscordGateway> {
+  const client = createV2DiscordClient(); const transport = new DiscordJsTransport(client); const router = new SuperuserRequestRouter(policy, transport, pi, store);
   client.on("messageCreate", (message) => {
     transport.register(message);
     void router.route(normalizeDiscordMessage(message)).catch((error: unknown) => { console.error(`Failed to route v2 Discord message ${message.id}: ${error instanceof Error ? error.message : String(error)}`); })
       .finally(() => { transport.unregister(message.id); });
   });
-  await client.login(discordToken); return client;
+  await client.login(discordToken); await router.initialize();
+  return { client, async shutdown() { await router.shutdown(); await client.destroy(); } };
 }

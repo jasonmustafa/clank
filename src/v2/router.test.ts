@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SuperuserRequestRouter, makeTaskThreadName, type DiscordRequest, type DiscordTransport, type PiProgress, type SuperuserPiFactory, type SuperuserPiSession } from "./router.js";
+import type { PersistedTaskState, TaskStore } from "./task-store.js";
 
 function request(overrides: Partial<DiscordRequest> = {}): DiscordRequest {
   return { id: "message-1", userId: "owner-123", channelId: "private-channel", threadId: null, guildId: "guild-1", location: "guild", content: "Inspect the checkout", authorIsBot: false, webhookId: null, ...overrides };
@@ -83,6 +84,31 @@ describe("superuser task router", () => {
     await expect(router.route(request({ id: "intrusion", userId: "intruder", channelId: "thread-1", threadId: "thread-1" }))).resolves.toEqual({ kind: "ignored" });
     expect(calls).toHaveLength(before);
     expect(sessions).toHaveLength(1);
+  });
+});
+
+describe("durable superuser task routing", () => {
+  it("marks active work interrupted, expires approvals, notices once, and resumes the saved session", async () => {
+    const { calls, sent } = harness();
+    let state: PersistedTaskState = { version: 1, tasks: [{ id: "old-task", requesterId: "owner-123", threadId: "old-thread", capabilityMode: "superuser", workingDirectory: "/work/original", lifecycleState: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:01:00.000Z", piSessionId: "saved-session" }], approvals: [{ id: "approval-1", taskId: "old-task", status: "pending", expiresAt: "2099-01-01T00:00:00.000Z" }] };
+    const store: TaskStore = { load: () => Promise.resolve(structuredClone(state)), save: (next) => { state = structuredClone(next); return Promise.resolve(); } };
+    const pi: SuperuserPiFactory = { create(options) { calls.push(`resume:${options.taskId}:${options.cwd}:${options.sessionId ?? "new"}`); return Promise.resolve({ prompt: (text) => Promise.resolve(`resumed:${text}`), followUp: () => Promise.resolve(), steer: () => Promise.resolve(), stop: () => Promise.resolve(), compact: () => Promise.resolve(), status: () => ({ busy: false, queued: 0, sessionId: "saved-session" }), dispose: () => Promise.resolve() }); } };
+    const discord: DiscordTransport = { createThread: () => Promise.reject(new Error("unused")), send: (channelId, content, options) => { sent.push({ channelId, content, kind: options?.kind }); return Promise.resolve(); }, updatePreview: () => Promise.resolve(), setTyping: () => Promise.resolve() };
+    const router = new SuperuserRequestRouter({ superuserIds: ["owner-123"], privateChannelIds: ["private-channel"], defaultWorkingDirectory: "/default" }, discord, pi, store);
+    await router.initialize(); await router.initialize();
+    expect(state.tasks[0]?.lifecycleState).toBe("interrupted"); expect(state.approvals[0]?.status).toBe("expired");
+    expect(sent.filter((entry) => entry.content.includes("interrupted"))).toHaveLength(1);
+    await router.route(request({ id: "reply", channelId: "old-thread", threadId: "old-thread", content: "continue" }));
+    expect(calls).toContain("resume:old-task:/work/original:saved-session");
+    expect(sent).toContainEqual({ channelId: "old-thread", content: "resumed:continue", kind: "final" });
+  });
+
+  it("stops accepting work and disposes runtimes during graceful shutdown", async () => {
+    const { router, calls, sessions } = harness(); await router.route(request());
+    const session = sessions[0]; if (session === undefined) throw new Error("session not created"); session.busy = true;
+    await router.shutdown();
+    expect(calls).toEqual(expect.arrayContaining(["stop", "dispose"]));
+    await expect(router.route(request({ id: "later" }))).resolves.toEqual({ kind: "ignored" });
   });
 });
 

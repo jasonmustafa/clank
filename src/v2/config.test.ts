@@ -10,6 +10,7 @@ const policy = {
     superuserIds: ["owner-id"],
     privateChannelIds: ["private-channel"],
   },
+  lifecycle: { taskStatePath: "/srv/clank/state/v2-tasks.json" },
   pi: {
     agentDir: "/srv/clank/.pi/agent",
     sessionsDirectory: "/srv/clank/pi-sessions-v2",
@@ -39,6 +40,7 @@ describe("v2 configuration", () => {
   it("rejects missing identities, relative paths, and invalid model settings without leaking secrets", async () => {
     const path = await configFile({
       discord: { applicationId: "app-id", superuserIds: [], privateChannelIds: [] },
+      lifecycle: { taskStatePath: "/state/tasks.json" },
       pi: {
         agentDir: "relative",
         sessionsDirectory: "/sessions",

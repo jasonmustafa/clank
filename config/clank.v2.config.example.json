@@ -4,6 +4,9 @@
     "superuserIds": ["<immutable-discord-user-id>"],
     "privateChannelIds": ["<private-discord-channel-id>"]
   },
+  "lifecycle": {
+    "taskStatePath": "/srv/clank/state/v2-tasks.json"
+  },
   "pi": {
     "agentDir": "/srv/clank/.pi/agent",
     "sessionsDirectory": "/srv/clank/pi-sessions-v2",

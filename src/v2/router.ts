@@ -1,119 +1,73 @@
 import { createHash } from "node:crypto";
+import type { PersistedTask, PersistedTaskState, TaskStore } from "./task-store.js";
 
 export type DiscordLocation = "dm" | "guild";
-export interface DiscordRequest {
-  id: string; userId: string; channelId: string; threadId: string | null; guildId: string | null;
-  location: DiscordLocation; content: string; authorIsBot: boolean; webhookId: string | null;
-}
+export interface DiscordRequest { id: string; userId: string; channelId: string; threadId: string | null; guildId: string | null; location: DiscordLocation; content: string; authorIsBot: boolean; webhookId: string | null; }
 export type PiProgress = { kind: "text"; text: string } | { kind: "tool"; name: string; status: "started" | "completed" };
-export interface DiscordTransport {
-  createThread(requestId: string, name: string): Promise<string>;
-  send(channelId: string, content: string, options?: { kind?: "preview" | "status" | "final" }): Promise<void>;
-  updatePreview(channelId: string, content: string): Promise<void>;
-  setTyping(channelId: string, active: boolean): Promise<void>;
-}
-export interface SuperuserPiSession {
-  prompt(prompt: string, onProgress?: (event: PiProgress) => void): Promise<string>;
-  followUp(prompt: string): Promise<void>;
-  steer(prompt: string): Promise<void>;
-  stop(): Promise<void>;
-  compact(): Promise<void>;
-  status(): { busy: boolean; queued: number; sessionId: string };
-  dispose(): Promise<void>;
-}
-export interface SuperuserPiFactory { create(options: { taskId: string; cwd: string }): Promise<SuperuserPiSession>; }
+export interface DiscordTransport { createThread(requestId: string, name: string): Promise<string>; send(channelId: string, content: string, options?: { kind?: "preview" | "status" | "final" }): Promise<void>; updatePreview(channelId: string, content: string): Promise<void>; setTyping(channelId: string, active: boolean): Promise<void>; }
+export interface SuperuserPiSession { prompt(prompt: string, onProgress?: (event: PiProgress) => void): Promise<string>; followUp(prompt: string): Promise<void>; steer(prompt: string): Promise<void>; stop(): Promise<void>; compact(): Promise<void>; status(): { busy: boolean; queued: number; sessionId: string }; dispose(): Promise<void>; }
+export interface SuperuserPiFactory { create(options: { taskId: string; cwd: string; sessionId?: string }): Promise<SuperuserPiSession>; }
 export interface SuperuserRoutingPolicy { superuserIds: readonly string[]; privateChannelIds: readonly string[]; defaultWorkingDirectory: string; }
 export type RouteResult = { kind: "ignored" } | { kind: "accepted" | "completed"; taskId: string };
-interface Task { id: string; ownerId: string; threadId: string; session: SuperuserPiSession; generation: number; running: boolean; }
+interface Task { record: PersistedTask; session: SuperuserPiSession | undefined; generation: number; running: boolean; }
 
 export class SuperuserRequestRouter {
-  readonly #tasks = new Map<string, Task>();
-  readonly #policy: SuperuserRoutingPolicy;
-  readonly #discord: DiscordTransport;
-  readonly #pi: SuperuserPiFactory;
-  constructor(policy: SuperuserRoutingPolicy, discord: DiscordTransport, pi: SuperuserPiFactory) {
-    this.#policy = policy; this.#discord = discord; this.#pi = pi;
+  readonly #tasks = new Map<string, Task>(); readonly #policy: SuperuserRoutingPolicy; readonly #discord: DiscordTransport; readonly #pi: SuperuserPiFactory; readonly #store: TaskStore | undefined;
+  #state: PersistedTaskState = { version: 1, tasks: [], approvals: [] }; #initializePromise?: Promise<void>; #accepting = true; #shuttingDown = false; #saveQueue = Promise.resolve(); readonly #activeRuns = new Set<Promise<RouteResult>>();
+  constructor(policy: SuperuserRoutingPolicy, discord: DiscordTransport, pi: SuperuserPiFactory, store?: TaskStore) { this.#policy = policy; this.#discord = discord; this.#pi = pi; this.#store = store; }
+
+  initialize(): Promise<void> { return this.#initializePromise ??= this.#initialize(); }
+  async #initialize(): Promise<void> {
+    if (this.#store === undefined) return;
+    this.#state = await this.#store.load(); const notices: PersistedTask[] = [];
+    for (const record of this.#state.tasks) {
+      if (record.lifecycleState === "active") { record.lifecycleState = "interrupted"; record.recoveryNoticePending = true; record.updatedAt = new Date().toISOString(); }
+      if (record.recoveryNoticePending === true) notices.push(record);
+      this.#tasks.set(record.threadId, { record, session: undefined, generation: 0, running: false });
+    }
+    for (const approval of this.#state.approvals) if (approval.status === "pending") approval.status = "expired";
+    await this.#persist();
+    for (const record of notices) { await this.#discord.send(record.threadId, `Task ${record.id} was interrupted by a restart. Reply here to resume saved Pi session ${record.piSessionId}.`, { kind: "status" }); record.recoveryNoticePending = false; await this.#persist(); }
   }
 
   async route(request: DiscordRequest): Promise<RouteResult> {
-    if (!this.#isAuthorized(request) || request.content.trim() === "") return { kind: "ignored" };
-    const taskChannelId = request.threadId ?? (request.location === "dm" ? request.channelId : undefined);
-    const existing = taskChannelId === undefined ? undefined : this.#tasks.get(taskChannelId);
-    if (existing !== undefined) return this.#continue(existing, request);
-    if (request.threadId !== null) return { kind: "ignored" };
-
-    const threadId = request.location === "guild"
-      ? await this.#discord.createThread(request.id, makeTaskThreadName(request.id, request.content))
-      : request.channelId;
-    let session: SuperuserPiSession;
-    try { session = await this.#createSession(request.id); }
-    catch (error) { await this.#discord.send(threadId, `Could not start task: ${error instanceof Error ? error.message : String(error)}`, { kind: "status" }); throw error; }
-    const task: Task = { id: request.id, ownerId: request.userId, threadId, session, generation: 0, running: false };
-    this.#tasks.set(threadId, task);
-    return this.#run(task, request.content);
+    await this.initialize(); if (!this.#accepting || !this.#isAuthorized(request) || request.content.trim() === "") return { kind: "ignored" };
+    const taskChannelId = request.threadId ?? (request.location === "dm" ? request.channelId : undefined); const existing = taskChannelId === undefined ? undefined : this.#tasks.get(taskChannelId);
+    if (existing !== undefined) return this.#continue(existing, request); if (request.threadId !== null) return { kind: "ignored" };
+    const threadId = request.location === "guild" ? await this.#discord.createThread(request.id, makeTaskThreadName(request.id, request.content)) : request.channelId;
+    let session: SuperuserPiSession; try { session = await this.#pi.create({ taskId: request.id, cwd: this.#policy.defaultWorkingDirectory }); } catch (error) { await this.#discord.send(threadId, `Could not start task: ${error instanceof Error ? error.message : String(error)}`, { kind: "status" }); throw error; }
+    const now = new Date().toISOString(); const record: PersistedTask = { id: request.id, requesterId: request.userId, threadId, capabilityMode: "superuser", workingDirectory: this.#policy.defaultWorkingDirectory, lifecycleState: "idle", createdAt: now, updatedAt: now, piSessionId: session.status().sessionId };
+    const task: Task = { record, session, generation: 0, running: false }; this.#tasks.set(threadId, task); this.#state.tasks.push(record); await this.#persist(); return this.#startRun(task, request.content);
   }
 
+  async shutdown(): Promise<void> {
+    this.#accepting = false; this.#shuttingDown = true; await this.initialize();
+    for (const task of this.#tasks.values()) if (task.session !== undefined && (task.running || task.session.status().busy)) { task.record.lifecycleState = "interrupted"; task.record.recoveryNoticePending = true; await task.session.stop(); }
+    await Promise.allSettled(this.#activeRuns);
+    for (const task of this.#tasks.values()) if (task.session !== undefined) { await task.session.dispose(); task.session = undefined; }
+    await this.#persist(); await this.#saveQueue;
+  }
+
+  async #session(task: Task): Promise<SuperuserPiSession> { return task.session ??= await this.#pi.create({ taskId: task.record.id, cwd: task.record.workingDirectory, sessionId: task.record.piSessionId }); }
   async #continue(task: Task, request: DiscordRequest): Promise<RouteResult> {
-    if (task.ownerId !== request.userId) return { kind: "ignored" };
-    const text = request.content.trim();
-    const [command, ...rest] = text.split(/\s+/u);
-    if (command === "/status") {
-      const state = task.session.status();
-      await this.#discord.send(task.threadId, `Task ${task.id}: ${state.busy ? "working" : "idle"}; ${String(state.queued)} queued; session ${state.sessionId}.`, { kind: "status" });
-    } else if (command === "/stop") {
-      await task.session.stop();
-      await this.#discord.send(task.threadId, "Stopped active work and cleared queued messages.", { kind: "status" });
-    } else if (command === "/compact") {
-      await task.session.compact();
-      await this.#discord.send(task.threadId, "Session context compacted.", { kind: "status" });
-    } else if (command === "/reset") {
-      await task.session.stop(); await task.session.dispose();
-      task.session = await this.#createSession(task.id); task.generation += 1;
-      await this.#discord.send(task.threadId, "Task session reset.", { kind: "status" });
-    } else if (command === "/steer") {
-      const direction = rest.join(" ").trim();
-      if (direction === "") await this.#discord.send(task.threadId, "Usage: /steer <instruction>", { kind: "status" });
-      else await task.session.steer(direction);
-    } else if (task.running || task.session.status().busy) {
-      await task.session.followUp(request.content);
-      await this.#discord.send(task.threadId, "Queued follow-up.", { kind: "status" });
-    } else {
-      return this.#run(task, request.content);
-    }
-    return { kind: "accepted", taskId: task.id };
+    if (task.record.requesterId !== request.userId) return { kind: "ignored" }; const session = await this.#session(task); const text = request.content.trim(); const [command, ...rest] = text.split(/\s+/u);
+    if (command === "/status") { const state = session.status(); await this.#discord.send(task.record.threadId, `Task ${task.record.id}: ${state.busy ? "working" : "idle"}; ${String(state.queued)} queued; session ${state.sessionId}.`, { kind: "status" }); }
+    else if (command === "/stop") { await session.stop(); task.record.lifecycleState = "stopped"; await this.#discord.send(task.record.threadId, "Stopped active work and cleared queued messages.", { kind: "status" }); }
+    else if (command === "/compact") { await session.compact(); await this.#discord.send(task.record.threadId, "Session context compacted.", { kind: "status" }); }
+    else if (command === "/reset") { await session.stop(); await session.dispose(); task.session = await this.#pi.create({ taskId: task.record.id, cwd: task.record.workingDirectory }); task.record.piSessionId = task.session.status().sessionId; task.generation += 1; await this.#discord.send(task.record.threadId, "Task session reset.", { kind: "status" }); }
+    else if (command === "/steer") { const direction = rest.join(" ").trim(); if (direction === "") await this.#discord.send(task.record.threadId, "Usage: /steer <instruction>", { kind: "status" }); else await session.steer(direction); }
+    else if (task.running || session.status().busy) { await session.followUp(request.content); await this.#discord.send(task.record.threadId, "Queued follow-up.", { kind: "status" }); }
+    else return this.#startRun(task, request.content);
+    task.record.updatedAt = new Date().toISOString(); await this.#persist(); return { kind: "accepted", taskId: task.record.id };
   }
 
+  #startRun(task: Task, prompt: string): Promise<RouteResult> { const run = this.#run(task, prompt); this.#activeRuns.add(run); void run.finally(() => this.#activeRuns.delete(run)).catch(() => undefined); return run; }
   async #run(task: Task, prompt: string): Promise<RouteResult> {
-    const generation = task.generation;
-    task.running = true;
-    await this.#discord.setTyping(task.threadId, true);
-    let preview = ""; let previewUpdate = Promise.resolve();
-    try {
-      const response = await task.session.prompt(prompt, (event) => {
-        if (event.kind === "text") {
-          preview += event.text;
-          previewUpdate = previewUpdate.then(() => this.#discord.updatePreview(task.threadId, preview.slice(-1_500))).catch(() => undefined);
-        } else {
-          previewUpdate = previewUpdate.then(() => this.#discord.send(task.threadId, `${event.status === "started" ? "Running" : "Finished"} ${event.name}`, { kind: "status" })).catch(() => undefined);
-        }
-      });
-      await previewUpdate;
-      if (task.generation === generation) await this.#discord.send(task.threadId, response || "Task completed without text output.", { kind: "final" });
-      return { kind: "completed", taskId: task.id };
-    } finally { task.running = false; await this.#discord.setTyping(task.threadId, false); }
+    const session = await this.#session(task); const generation = task.generation; task.running = true; task.record.lifecycleState = "active"; task.record.updatedAt = new Date().toISOString(); await this.#persist(); await this.#discord.setTyping(task.record.threadId, true); let preview = ""; let previewUpdate = Promise.resolve();
+    try { const response = await session.prompt(prompt, (event) => { if (event.kind === "text") { preview += event.text; previewUpdate = previewUpdate.then(() => this.#discord.updatePreview(task.record.threadId, preview.slice(-1_500))).catch(() => undefined); } else previewUpdate = previewUpdate.then(() => this.#discord.send(task.record.threadId, `${event.status === "started" ? "Running" : "Finished"} ${event.name}`, { kind: "status" })).catch(() => undefined); }); await previewUpdate; if (task.generation === generation) await this.#discord.send(task.record.threadId, response || "Task completed without text output.", { kind: "final" }); return { kind: "completed", taskId: task.record.id }; }
+    finally { task.running = false; task.record.lifecycleState = this.#shuttingDown ? "interrupted" : "idle"; if (this.#shuttingDown) task.record.recoveryNoticePending = true; else delete task.record.recoveryNoticePending; task.record.piSessionId = session.status().sessionId; task.record.updatedAt = new Date().toISOString(); await this.#persist(); await this.#discord.setTyping(task.record.threadId, false); }
   }
-
-  #createSession(taskId: string) { return this.#pi.create({ taskId, cwd: this.#policy.defaultWorkingDirectory }); }
-  #isAuthorized(request: DiscordRequest): boolean {
-    if (request.authorIsBot || request.webhookId !== null || !this.#policy.superuserIds.includes(request.userId)) return false;
-    return request.location === "dm" ? request.guildId === null : request.guildId !== null && (request.threadId !== null || this.#policy.privateChannelIds.includes(request.channelId));
-  }
+  #persist(): Promise<void> { const store = this.#store; if (store === undefined) return Promise.resolve(); this.#saveQueue = this.#saveQueue.then(() => store.save(structuredClone(this.#state))); return this.#saveQueue; }
+  #isAuthorized(request: DiscordRequest): boolean { if (request.authorIsBot || request.webhookId !== null || !this.#policy.superuserIds.includes(request.userId)) return false; return request.location === "dm" ? request.guildId === null : request.guildId !== null && (request.threadId !== null || this.#policy.privateChannelIds.includes(request.channelId)); }
 }
-
-export function makeTaskThreadName(taskId: string, content: string): string {
-  const shortId = createHash("sha256").update(taskId).digest("hex").slice(0, 8);
-  const concise = content.trim().split(/\s+/u).slice(0, 12).join(" ");
-  const summary = concise.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/gu, "") || "task";
-  const suffix = ` — ${shortId}`;
-  return `${summary.slice(0, 100 - suffix.length)}${suffix}`;
-}
+export function makeTaskThreadName(taskId: string, content: string): string { const shortId = createHash("sha256").update(taskId).digest("hex").slice(0, 8); const concise = content.trim().split(/\s+/u).slice(0, 12).join(" "); const summary = concise.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/gu, "") || "task"; const suffix = ` — ${shortId}`; return `${summary.slice(0, 100 - suffix.length)}${suffix}`; }

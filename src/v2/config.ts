@@ -21,6 +21,7 @@ export interface V2PiPolicy {
 export interface V2Policy {
   discord: V2DiscordPolicy;
   pi: V2PiPolicy;
+  lifecycle: { taskStatePath: string };
 }
 
 export interface V2RuntimeConfig {
@@ -62,7 +63,8 @@ function validatePolicy(value: unknown, issues: string[]): V2Policy | undefined 
   const discordValue = objectValue(root?.discord, "discord", issues);
   const piValue = objectValue(root?.pi, "pi", issues);
   const modelValue = objectValue(piValue?.model, "pi.model", issues);
-  if (root === undefined || discordValue === undefined || piValue === undefined || modelValue === undefined) return undefined;
+  const lifecycleValue = objectValue(root?.lifecycle, "lifecycle", issues);
+  if (root === undefined || discordValue === undefined || piValue === undefined || modelValue === undefined || lifecycleValue === undefined) return undefined;
 
   const superuserIds = stringArray(discordValue.superuserIds, "discord.superuserIds", issues);
   if (superuserIds.length === 0) issues.push("discord.superuserIds must contain at least one immutable Discord user ID");
@@ -76,6 +78,7 @@ function validatePolicy(value: unknown, issues: string[]): V2Policy | undefined 
       superuserIds,
       privateChannelIds,
     },
+    lifecycle: { taskStatePath: absolutePath(lifecycleValue.taskStatePath, "lifecycle.taskStatePath", issues) },
     pi: {
       agentDir: absolutePath(piValue.agentDir, "pi.agentDir", issues),
       sessionsDirectory: absolutePath(piValue.sessionsDirectory, "pi.sessionsDirectory", issues),

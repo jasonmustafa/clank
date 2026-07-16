@@ -64,7 +64,7 @@ export class SdkSuperuserPiFactory implements SuperuserPiFactory {
     this.#options = options;
   }
 
-  async create(options: { taskId: string; cwd: string }): Promise<SdkSuperuserPiSession> {
+  async create(options: { taskId: string; cwd: string; sessionId?: string }): Promise<SdkSuperuserPiSession> {
     const constructed = await constructSuperuserPiSession(this.#options, options);
     return new SdkSuperuserPiSession(constructed.result);
   }
@@ -72,7 +72,7 @@ export class SdkSuperuserPiFactory implements SuperuserPiFactory {
 
 export async function constructSuperuserPiSession(
   config: SuperuserPiOptions,
-  task: { taskId: string; cwd: string },
+  task: { taskId: string; cwd: string; sessionId?: string },
 ): Promise<ConstructedSuperuserPiSession> {
   const sessionDirectory = taskSessionDirectory(config.sessionsDirectory, task.taskId);
   await mkdir(sessionDirectory, { recursive: true });
@@ -87,9 +87,16 @@ export async function constructSuperuserPiSession(
     modelRegistry,
     model,
     thinkingLevel: config.model.thinkingLevel,
-    sessionManager: SessionManager.create(task.cwd, sessionDirectory),
+    sessionManager: sessionManagerForTask(task.cwd, sessionDirectory, task.sessionId),
   });
   return { result, cwd: task.cwd, sessionDirectory };
+}
+
+function sessionManagerForTask(cwd: string, sessionDirectory: string, sessionId?: string): SessionManager {
+  if (sessionId === undefined) return SessionManager.create(cwd, sessionDirectory);
+  const manager = SessionManager.continueRecent(cwd, sessionDirectory);
+  if (manager.getSessionId() !== sessionId) throw new Error(`Saved Pi session ${sessionId} is unavailable`);
+  return manager;
 }
 
 export function taskSessionDirectory(sessionsDirectory: string, taskId: string): string {
