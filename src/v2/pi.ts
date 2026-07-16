@@ -14,6 +14,7 @@ import { join, relative, resolve } from "node:path";
 import { createTaskDiscordAttachTool, type TaskAttachmentBridge } from "./attachments.js";
 import type { PiProgress, SuperuserPiFactory, SuperuserPiSession } from "./router.js";
 import type { CasualPiFactory, CasualPiSession } from "./casual.js";
+import { createCasualWebTools } from "./web.js";
 
 export interface SuperuserPiOptions {
   agentDir: string;
@@ -58,7 +59,7 @@ export async function constructCasualPiSession(config: CasualPiOptions): Promise
   const settingsManager = SettingsManager.inMemory();
   const resourceLoader = new DefaultResourceLoader({ cwd: config.isolationDirectory, agentDir: config.isolationDirectory, settingsManager, noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true });
   await resourceLoader.reload();
-  const result = await createAgentSession({ cwd: config.isolationDirectory, agentDir: config.isolationDirectory, authStorage, modelRegistry, model, thinkingLevel: config.model.thinkingLevel, settingsManager, resourceLoader, sessionManager: SessionManager.inMemory(config.isolationDirectory), noTools: "all", tools: [], customTools: [] });
+  const result = await createAgentSession({ cwd: config.isolationDirectory, agentDir: config.isolationDirectory, authStorage, modelRegistry, model, thinkingLevel: config.model.thinkingLevel, settingsManager, resourceLoader, sessionManager: SessionManager.inMemory(config.isolationDirectory), noTools: "builtin", customTools: createCasualWebTools() });
   return { result };
 }
 
