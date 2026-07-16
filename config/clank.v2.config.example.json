@@ -1,0 +1,17 @@
+{
+  "discord": {
+    "applicationId": "<discord-application-id>",
+    "superuserIds": ["<immutable-discord-user-id>"],
+    "privateChannelIds": ["<private-discord-channel-id>"]
+  },
+  "pi": {
+    "agentDir": "/srv/clank/.pi/agent",
+    "sessionsDirectory": "/srv/clank/pi-sessions-v2",
+    "defaultWorkingDirectory": "/srv/clank/app",
+    "model": {
+      "provider": "<pi-provider>",
+      "id": "<pi-model-id>",
+      "thinkingLevel": "high"
+    }
+  }
+}

@@ -2,6 +2,12 @@
 
 Clank is a private Discord-to-Pi assistant daemon. It is designed for one trusted operator on Debian 13 and uses defense-in-depth controls around an unprivileged daemon and narrow root-owned helpers.
 
+## v2 superuser path
+
+The first v2 path is developed alongside the production implementation. It accepts messages only from configured immutable Discord user IDs in DMs or configured private channels, starts an ordinary full-capability Pi session in the configured default working directory, and replies through Discord. Pi has its standard `read`, `write`, `edit`, and `bash` tools and the Clank Unix account's normal settings and resources; no v1 workspace, path, command, or GitHub bridge policy is installed.
+
+Copy `config/clank.v2.config.example.json` outside the repository, replace every placeholder, set `CLANK_DISCORD_TOKEN` and `CLANK_V2_CONFIG_PATH`, then run `npm run dev:v2` (or build and run `npm run start:v2`). Use a separate development Discord application while v2 is being validated.
+
 > **Security boundary:** Clank is not a hard sandbox. Pi can run code and shell commands as `clank`, and a model or dependency compromise can access anything that account can access. Path checks, confirmations, separate job clones, environment filtering, sudo allowlists, and protected ownership reduce risk; they do not provide container or VM isolation. Use a dedicated VPS/account, grant only necessary access, review privileged requests, and do not host unrelated sensitive data under the `clank` account.
 
 ## Discord application

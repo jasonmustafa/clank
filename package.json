@@ -9,8 +9,10 @@
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:v2": "tsx watch src/v2/index.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
+    "start:v2": "node dist/v2/index.js",
     "check": "eslint . && tsc --noEmit",
     "check:public": "tsx scripts/check-public-repo.ts",
     "test": "vitest run --passWithNoTests",
