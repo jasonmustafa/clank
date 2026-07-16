@@ -14,7 +14,8 @@ EnvironmentFile=/etc/clank/clank.env
 ExecStart=/srv/clank/app/setup/systemd/run-clank
 Restart=on-failure
 RestartSec=5s
-NoNewPrivileges=true
+# Required for the exact, no-argument sudoers-allowlisted Clank helpers.
+NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
