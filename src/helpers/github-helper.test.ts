@@ -33,6 +33,24 @@ describe("GitHub helper", () => {
     expect(JSON.parse(String(fetchCalls[0]?.init?.body))).toMatchObject({ draft: false, head: "clank/job-1-work" });
   });
 
+  it("creates an issue through the REST API without auditing its content", async () => {
+    const entries: Record<string, unknown>[] = [];
+    const fetchCalls: Array<{ url: string; init: RequestInit | undefined }> = [];
+    const requestFetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => { fetchCalls.push({ url: String(url), init }); return new Response(JSON.stringify({ number: 9, html_url: "https://github.com/owner/repo/issues/9" }), { status: 201 }); });
+    const result = await executeGithubRequest({ action: "create-issue", repository: "owner/repo", title: "Issue title", body: "Sensitive issue details" }, policy, context, { fetch: requestFetch as typeof fetch, audit: async (entry) => { entries.push(entry); } });
+    expect(result).toMatchObject({ ok: true, action: "create-issue", number: 9 });
+    expect(fetchCalls[0]?.url).toBe("https://api.github.com/repos/owner/repo/issues");
+    expect(fetchCalls[0]?.init?.method).toBe("POST");
+    expect(JSON.parse(String(fetchCalls[0]?.init?.body))).toEqual({ title: "Issue title", body: "Sensitive issue details" });
+    expect(JSON.stringify(entries)).not.toContain("Sensitive issue details");
+  });
+
+  it("validates issue title and body limits", () => {
+    expect(validateGithubHelperRequest({ action: "create-issue", repository: "owner/repo", title: "", body: "" }).ok).toBe(false);
+    expect(validateGithubHelperRequest({ action: "create-issue", repository: "owner/repo", title: "x".repeat(257), body: "" }).ok).toBe(false);
+    expect(validateGithubHelperRequest({ action: "create-issue", repository: "owner/repo", title: "Valid", body: "x".repeat(65_537) }).ok).toBe(false);
+  });
+
   it("denies repositories outside both allowlists", async () => {
     await expect(executeGithubRequest({ action: "clone", repository: "other/repo", destination: "/srv/clank/workspaces/jobs/job-1" }, policy, context, { audit: async () => undefined })).rejects.toThrow("denied repository");
   });

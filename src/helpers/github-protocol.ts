@@ -2,12 +2,14 @@ export type GithubHelperRequest =
   | { action: "clone"; repository: string; destination: string }
   | { action: "fetch"; repository: string; workspacePath: string }
   | { action: "push-branch"; jobId: string; repository: string; workspacePath: string; branch: string; expectedCommit: string }
-  | { action: "create-pull-request"; jobId: string; repository: string; head: string; base: string; title: string; body: string; draft: boolean };
+  | { action: "create-pull-request"; jobId: string; repository: string; head: string; base: string; title: string; body: string; draft: boolean }
+  | { action: "create-issue"; repository: string; title: string; body: string };
 
 export interface GithubAuditContext { requesterId: string; jobId: string }
 export type GithubHelperResult =
   | { ok: true; action: "clone" | "fetch" | "push-branch" }
   | { ok: true; action: "create-pull-request"; number: number; url: string; draft: boolean }
+  | { ok: true; action: "create-issue"; number: number; url: string }
   | { ok: false; action: GithubHelperRequest["action"]; error: string };
 export type GithubValidationResult = { ok: true; value: GithubHelperRequest } | { ok: false; error: string };
 
@@ -42,6 +44,9 @@ export function validateGithubHelperRequest(value: unknown): GithubValidationRes
       case "create-pull-request":
         if (!keys(value, ["action", "jobId", "repository", "head", "base", "title", "body", "draft"]) || typeof value.jobId !== "string" || !JOB_ID.test(value.jobId) || !text(value.head, 255) || !isClankBranch(value.head, value.jobId) || !text(value.base, 255) || !REF.test(value.base) || value.base.startsWith("clank/") || !text(value.title, 256) || typeof value.body !== "string" || value.body.length > 65_536 || typeof value.draft !== "boolean") return bad("invalid pull request");
         return { ok: true, value: { action: "create-pull-request", jobId: value.jobId, repository: repository(value.repository), head: value.head, base: value.base, title: value.title, body: value.body, draft: value.draft } };
+      case "create-issue":
+        if (!keys(value, ["action", "repository", "title", "body"]) || !text(value.title, 256) || typeof value.body !== "string" || value.body.length > 65_536) return bad("invalid issue");
+        return { ok: true, value: { action: "create-issue", repository: repository(value.repository), title: value.title, body: value.body } };
       default: return bad("unsupported action");
     }
   } catch { return bad("invalid repository"); }

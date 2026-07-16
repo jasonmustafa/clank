@@ -1,12 +1,22 @@
 /* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call */
 import { describe, expect, it, vi } from "vitest";
-import { PullRequestBridge, type GitInspector, type PullRequestHelper } from "./index.js";
+import { createGithubIssueTool, PullRequestBridge, type GitInspector, type PullRequestHelper } from "./index.js";
 import { type GithubHelperRequest, type GithubHelperResult } from "../helpers/github-protocol.js";
 
 const repo = { jobId: "job-1", path: "/srv/clank/workspaces/jobs/job-1", repository: "owner/repo", prAllowed: true };
 const policy = { commitAuthorEmail: "owner@example.com", commitFooter: "Generated-by: Clank", maxChangedFiles: 10, maxChangedLines: 100, maxDiffBytes: 10_000, defaultBaseBranch: "main" };
 function inspector(overrides: Partial<Record<string, string>> = {}): GitInspector { return { output: vi.fn(async (args) => { const command = args[0] ?? ""; if (command === "rev-parse") return "a".repeat(40); if (command === "diff" && args.includes("--numstat")) return overrides.numstat ?? "2\t1\tfile.ts\n"; if (command === "diff") return overrides.diff ?? "patch"; return overrides.log ?? "owner@example.com\0Subject\n\nGenerated-by: Clank\0\n"; }) }; }
-function helper(): PullRequestHelper & { invoke: ReturnType<typeof vi.fn> } { const invoke = vi.fn(async (request: GithubHelperRequest): Promise<GithubHelperResult> => request.action === "create-pull-request" ? { ok: true, action: request.action, number: 1, url: "https://example/pr/1", draft: request.draft } : { ok: true, action: request.action }); return { invoke }; }
+function helper(): PullRequestHelper & { invoke: ReturnType<typeof vi.fn> } { const invoke = vi.fn(async (request: GithubHelperRequest): Promise<GithubHelperResult> => request.action === "create-pull-request" ? { ok: true, action: request.action, number: 1, url: "https://example/pr/1", draft: request.draft } : request.action === "push-branch" ? { ok: true, action: request.action } : { ok: false, action: request.action, error: "unexpected action" }); return { invoke }; }
+
+describe("GitHub issue tool", () => {
+  it("passes bounded issue content and job context to the helper", async () => {
+    const invoke = vi.fn(async (): Promise<GithubHelperResult> => ({ ok: true, action: "create-issue", number: 12, url: "https://github.com/owner/repo/issues/12" }));
+    const tool = createGithubIssueTool({ invoke }, "123", "job-1");
+    const result = await tool.execute("call-1", { repository: "owner/repo", title: "Improve threads", body: "Details\n\n— Written by Clank." }, new AbortController().signal, () => undefined, {} as never);
+    expect(invoke).toHaveBeenCalledWith({ action: "create-issue", repository: "owner/repo", title: "Improve threads", body: "Details\n\n— Written by Clank." }, { requesterId: "123", jobId: "job-1" });
+    expect(result.content[0]).toMatchObject({ type: "text", text: "Created issue #12: https://github.com/owner/repo/issues/12" });
+  });
+});
 
 describe("PullRequestBridge", () => {
   it("validates commits, pushes exact HEAD, then creates a normal PR", async () => {

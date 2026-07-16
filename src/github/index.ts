@@ -11,6 +11,22 @@ export interface CreatePullRequestInput { branch: string; title: string; body?: 
 export interface PullRequestHelper { invoke(request: GithubHelperRequest, context: { requesterId: string; jobId: string }): Promise<GithubHelperResult> }
 export interface GitInspector { output(args: readonly string[], cwd: string): Promise<string> }
 
+const issueParameters = Type.Object({ repository: Type.String(), title: Type.String(), body: Type.Optional(Type.String()) });
+export function createGithubIssueTool(helper: PullRequestHelper, requesterId: string, jobId: string): ToolDefinition<typeof issueParameters> {
+  return {
+    name: "create_github_issue",
+    label: "Create GitHub issue",
+    description: "Create an issue in a policy-allowed GitHub repository. Include any requested authorship or generated-by disclaimer in the body.",
+    parameters: issueParameters,
+    execute: async (_id, params) => {
+      const result = await helper.invoke({ action: "create-issue", repository: params.repository, title: params.title, body: params.body ?? "" }, { requesterId, jobId });
+      if (!result.ok) throw new Error(result.error);
+      if (result.action !== "create-issue") throw new Error("GitHub operation failed");
+      return { content: [{ type: "text", text: `Created issue #${String(result.number)}: ${result.url}` }], details: result };
+    },
+  };
+}
+
 const pullRequestParameters = Type.Object({ branch: Type.String(), title: Type.String(), body: Type.Optional(Type.String()), base: Type.Optional(Type.String()), draft: Type.Optional(Type.Boolean()), incomplete: Type.Optional(Type.Boolean()) });
 export function createPullRequestTool(bridge: PullRequestBridge, repo: PullRequestRepository, requesterId: string): ToolDefinition<typeof pullRequestParameters> {
   return { name: "create_pull_request", label: "Create pull request", description: "Validate local commits, push this job's Clank branch, and open a GitHub pull request.", parameters: pullRequestParameters, execute: async (_id, params) => { const result = await bridge.create(repo, params, requesterId); if (!result.ok) throw new Error(result.error); return { content: [{ type: "text", text: result.action === "create-pull-request" ? `Created pull request #${String(result.number)}: ${result.url}` : "GitHub operation failed" }], details: result }; } };

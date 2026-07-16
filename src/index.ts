@@ -14,6 +14,7 @@ import { attachApprovalInteractionRouter, DiscordApprovalMessenger } from "./saf
 import { createSystemRequestService, GithubHelperClient, SystemHelperClient } from "./helpers/index.js";
 import { ResourceUpdater } from "./resources/index.js";
 import { DeploymentManager, SpawnRunner } from "./deployment/index.js";
+import { createGithubIssueTool } from "./github/index.js";
 
 export const serviceName = "clank";
 
@@ -68,7 +69,7 @@ async function main(): Promise<void> {
     sessionsDir: config.policy.paths.sessions,
     model: { provider: defaultProvider, id: defaultModel },
     thinkingLevel: settings.defaultThinkingLevel ?? "high",
-    customTools: [createDiscordAttachTool(queueFor(job))],
+    customTools: [createDiscordAttachTool(queueFor(job)), createGithubIssueTool(github, job.requesterId, job.id)],
     safety: {
       ...commandSafetyPolicy({ workspaceRoot: job.workspacePath, protectedRoots: [agentDir, config.policy.paths.state, config.policy.paths.resources, "/srv/clank/config", "/usr/local/lib/clank"] }, job.profile, config.policy.safety),
       confirm: () => Promise.resolve(false),

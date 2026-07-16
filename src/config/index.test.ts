@@ -159,6 +159,7 @@ describe("loadConfig", () => {
     await expect(loadConfig({
       env: { CLANK_CONFIG_PATH: path, CLANK_DISCORD_TOKEN: secret },
       cwd: "/unused",
+      envPath: "/does/not/exist",
     })).rejects.toSatisfy((error: unknown) => {
       expect(error).toBeInstanceOf(ConfigValidationError);
       const message = error instanceof Error ? error.message : String(error);

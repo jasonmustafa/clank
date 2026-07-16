@@ -22,8 +22,12 @@ export async function executeGithubRequest(input: unknown, policy: GithubHelperP
   const base = { timestamp: (dependencies.now?.() ?? new Date()).toISOString(), helper: "github", action: request.action, arguments: auditArguments(request), requesterId: safeId(context.requesterId), jobId: safeId(context.jobId) };
   await audit({ ...base, outcome: "started" });
   try {
-    const result = request.action === "create-pull-request" ? await createPullRequest(request, policy, dependencies.fetch ?? fetch) : await gitAction(request, policy, dependencies.run ?? runGit);
-    await audit({ ...base, outcome: result.ok ? "succeeded" : "failed", ...(result.action === "create-pull-request" && result.ok ? { number: result.number, url: result.url } : {}) });
+    const result = request.action === "create-pull-request"
+      ? await createPullRequest(request, policy, dependencies.fetch ?? fetch)
+      : request.action === "create-issue"
+        ? await createIssue(request, policy, dependencies.fetch ?? fetch)
+        : await gitAction(request, policy, dependencies.run ?? runGit);
+    await audit({ ...base, outcome: result.ok ? "succeeded" : "failed", ...((result.action === "create-pull-request" || result.action === "create-issue") && result.ok ? { number: result.number, url: result.url } : {}) });
     return result;
   } catch (error) {
     await audit({ ...base, outcome: "failed" });
@@ -43,7 +47,7 @@ function assertWorkspace(path: string, root: string): void {
   const rel = relative(resolve(root, "jobs"), resolve(path));
   if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) throw new Error("GitHub helper denied workspace path");
 }
-async function gitAction(request: Exclude<GithubHelperRequest, { action: "create-pull-request" }>, policy: GithubHelperPolicy, run: NonNullable<GithubHelperDependencies["run"]>): Promise<GithubHelperResult> {
+async function gitAction(request: Extract<GithubHelperRequest, { action: "clone" | "fetch" | "push-branch" }>, policy: GithubHelperPolicy, run: NonNullable<GithubHelperDependencies["run"]>): Promise<GithubHelperResult> {
   const env = { PATH: "/usr/bin:/bin", LANG: "C.UTF-8", GIT_TERMINAL_PROMPT: "0", GITHUB_TOKEN: policy.token };
   const url = `https://github.com/${request.repository}.git`;
   let args: string[]; let cwd: string | undefined;
@@ -61,7 +65,15 @@ async function createPullRequest(request: Extract<GithubHelperRequest, { action:
   if (!isPr(data)) throw new Error("GitHub helper received invalid API response");
   return { ok: true, action: request.action, number: data.number, url: data.html_url, draft: request.draft };
 }
-function isPr(value: unknown): value is { number: number; html_url: string } { return typeof value === "object" && value !== null && Number.isInteger((value as Record<string, unknown>).number) && typeof (value as Record<string, unknown>).html_url === "string"; }
+async function createIssue(request: Extract<GithubHelperRequest, { action: "create-issue" }>, policy: GithubHelperPolicy, requestFetch: typeof fetch): Promise<GithubHelperResult> {
+  const response = await requestFetch(`${policy.apiBaseUrl ?? "https://api.github.com"}/repos/${request.repository}/issues`, { method: "POST", headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${policy.token}`, "Content-Type": "application/json", "User-Agent": "Clank" }, body: JSON.stringify({ title: request.title, body: request.body }), signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) return { ok: false, action: request.action, error: `GitHub API request failed (${String(response.status)})` };
+  const data: unknown = await response.json();
+  if (!isNumberedUrl(data)) throw new Error("GitHub helper received invalid API response");
+  return { ok: true, action: request.action, number: data.number, url: data.html_url };
+}
+function isPr(value: unknown): value is { number: number; html_url: string } { return isNumberedUrl(value); }
+function isNumberedUrl(value: unknown): value is { number: number; html_url: string } { return typeof value === "object" && value !== null && Number.isInteger((value as Record<string, unknown>).number) && typeof (value as Record<string, unknown>).html_url === "string"; }
 function auditArguments(request: GithubHelperRequest): Record<string, unknown> { return { repository: request.repository, ...(request.action === "push-branch" ? { branch: request.branch, expectedCommit: request.expectedCommit } : {}), ...(request.action === "create-pull-request" ? { head: request.head, base: request.base, draft: request.draft } : {}) }; }
 function safeId(value: string): string | undefined { return /^[A-Za-z0-9_-]{1,128}$/u.test(value) ? value : undefined; }
 async function appendAudit(entry: Record<string, unknown>): Promise<void> { const file = await open(AUDIT_PATH, "a", 0o600); try { await file.write(`${JSON.stringify(entry)}\n`); await file.sync(); } finally { await file.close(); } }
