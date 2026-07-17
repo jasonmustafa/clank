@@ -83,6 +83,18 @@ sudo -u clank -H gh auth login                          # or provide standard gh
 
 Put the deployment's required generated-by trailer (for example, `Generated-by: Clank`) in the ordinary global `AGENTS.md` instructions. No Clank Git/GitHub bridge, command filter, commit hook, or push-policy helper is used by superuser sessions. Verify the deployment in a dedicated test repository by asking a v2 task to edit and check a branch, commit with the configured trailer, push, run `gh issue create`, and run `gh pr create`; never use the production repository for the first smoke test. The normal unit suite performs this workflow against a local bare Git remote and a fake `gh`, so it makes no live GitHub or SSH calls.
 
+### Discord command approval
+
+V2 can pause destructive Bash calls and post the exact command, task, requester, working directory, and expiration in the owning Discord thread. Only configured superuser IDs can use the **Approve** and **Deny** buttons. Decisions are task- and command-bound, expire, and are consumed once; restart, interruption, denial, or timeout leaves the command unexecuted.
+
+The `approvals` policy separates three deployment choices:
+
+- `destructiveConfirmation` gates recognized ordinary destructive commands.
+- `restartCommand` permits one exact, approval-gated narrow service restart command (normally backed by a narrowly scoped root-owned sudoers/helper rule).
+- `privilegedExecution` is `disabled` by default. Setting it to `approval-required` gates general `sudo` commands but grants the Clank account effectively root-equivalent capability if passwordless sudo is also configured.
+
+> **Approval is a mistake-mitigation control, not a security sandbox.** It can stop an accidental model tool call, but cannot protect against compromised Clank code, a compromised model/dependency, or an account with general passwordless sudo. A compromised daemon can bypass its own confirmation UI. Prefer the exact restart capability, keep general privileged execution disabled, and treat any unrestricted passwordless sudo deployment as root-equivalent.
+
 ### Pi OpenAI subscription authentication
 
 Authenticate interactively as the service account so credentials are stored under its home, not root's or an administrator's:

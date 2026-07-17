@@ -12,6 +12,7 @@ const policy = {
     casual: { allowedGuildIds: ["guild"], allowedChannelIds: ["casual"], continuationTtlMs: 300_000, maxContinuationTurns: 3, userRateLimit: { requests: 5, windowMs: 60_000 }, guildRateLimit: { requests: 20, windowMs: 60_000 } },
   },
   lifecycle: { taskStatePath: "/srv/clank/state/v2-tasks.json" },
+  approvals: { expiresMs: 300_000, destructiveConfirmation: true, restartCommand: "sudo systemctl restart clank.service", privilegedExecution: "disabled" },
   attachments: { temporaryRoot: "/srv/clank/tmp/v2-attachments", maxCount: 10, maxInputBytesEach: 10_000, maxInputBytesTotal: 20_000, maxOutputBytesEach: 10_000, maxOutputCount: 10 },
   pi: {
     agentDir: "/srv/clank/.pi/agent",
@@ -46,6 +47,7 @@ describe("v2 configuration", () => {
     const path = await configFile({
       discord: { applicationId: "app-id", superuserIds: [], privateChannelIds: [], casual: { allowedGuildIds: [], allowedChannelIds: [], continuationTtlMs: 1, maxContinuationTurns: 1, userRateLimit: { requests: 1, windowMs: 1 }, guildRateLimit: { requests: 1, windowMs: 1 } } },
       lifecycle: { taskStatePath: "/state/tasks.json" },
+      approvals: { expiresMs: 1, destructiveConfirmation: true, restartCommand: null, privilegedExecution: "disabled" },
       attachments: { temporaryRoot: "/tmp/attachments", maxCount: 10, maxInputBytesEach: 10_000, maxInputBytesTotal: 20_000, maxOutputBytesEach: 10_000, maxOutputCount: 10 },
       pi: {
         agentDir: "relative",

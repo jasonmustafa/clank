@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TaskAttachmentBridge } from "./attachments.js";
 import { SuperuserRequestRouter, makeTaskThreadName, type DiscordRequest, type DiscordTransport, type PiProgress, type SuperuserPiFactory, type SuperuserPiSession } from "./router.js";
 import type { PersistedTaskState, TaskStore } from "./task-store.js";
@@ -120,7 +120,7 @@ describe("superuser task router", () => {
 describe("durable superuser task routing", () => {
   it("marks active work interrupted, expires approvals, notices once, and resumes the saved session", async () => {
     const { calls, sent } = harness();
-    let state: PersistedTaskState = { version: 1, tasks: [{ id: "old-task", requesterId: "owner-123", threadId: "old-thread", capabilityMode: "superuser", workingDirectory: "/work/original", lifecycleState: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:01:00.000Z", piSessionId: "saved-session" }], approvals: [{ id: "approval-1", taskId: "old-task", status: "pending", expiresAt: "2099-01-01T00:00:00.000Z" }] };
+    let state: PersistedTaskState = { version: 1, tasks: [{ id: "old-task", requesterId: "owner-123", threadId: "old-thread", capabilityMode: "superuser", workingDirectory: "/work/original", lifecycleState: "active", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:01:00.000Z", piSessionId: "saved-session" }], approvals: [{ id: "approval-1", taskId: "old-task", requesterId: "owner-123", command: "rm -rf build", workingDirectory: "/work/original", status: "pending", createdAt: "2026-01-01T00:00:00.000Z", expiresAt: "2099-01-01T00:00:00.000Z" }] };
     const store: TaskStore = { load: () => Promise.resolve(structuredClone(state)), save: (next) => { state = structuredClone(next); return Promise.resolve(); } };
     const pi: SuperuserPiFactory = { create(options) { calls.push(`resume:${options.taskId}:${options.cwd}:${options.sessionId ?? "new"}`); return Promise.resolve({ prompt: (text) => Promise.resolve(`resumed:${text}`), followUp: () => Promise.resolve(), steer: () => Promise.resolve(), stop: () => Promise.resolve(), compact: () => Promise.resolve(), status: () => ({ busy: false, queued: 0, sessionId: "saved-session" }), dispose: () => Promise.resolve() }); } };
     const discord: DiscordTransport = { createThread: () => Promise.reject(new Error("unused")), send: (channelId, content, options) => { sent.push({ channelId, content, kind: options?.kind }); return Promise.resolve(undefined); }, updatePreview: () => Promise.resolve(), setTyping: () => Promise.resolve() };
@@ -139,6 +139,45 @@ describe("durable superuser task routing", () => {
     await router.shutdown();
     expect(calls).toEqual(expect.arrayContaining(["stop", "dispose"]));
     await expect(router.route(request({ id: "later" }))).resolves.toEqual({ kind: "ignored" });
+  });
+});
+
+describe("Discord command approvals", () => {
+  function approvalHarness(now = () => Date.parse("2026-01-01T00:00:00.000Z"), command = "sudo systemctl restart clank", privilegedExecution: "disabled" | "approval-required" = "disabled") {
+    const sent: { channelId: string; content: string; approvalId?: string }[] = []; const executed: string[] = []; let state: PersistedTaskState = { version: 1, tasks: [], approvals: [] };
+    const store: TaskStore = { load: () => Promise.resolve(structuredClone(state)), save: (next) => { state = structuredClone(next); return Promise.resolve(); } };
+    const discord: DiscordTransport = { createThread: () => Promise.resolve("thread-approval"), send: (channelId, content, options) => { sent.push({ channelId, content, ...(options?.approval === undefined ? {} : { approvalId: options.approval.id }) }); return Promise.resolve(undefined); }, updatePreview: () => Promise.resolve(), setTyping: () => Promise.resolve() };
+    const pi: SuperuserPiFactory = { create(options) { return Promise.resolve({ async prompt() { if (await (options.confirmCommand?.(command) ?? false)) { executed.push(command); return "command completed"; } return "command not executed"; }, followUp: () => Promise.resolve(), steer: () => Promise.resolve(), stop: () => Promise.resolve(), compact: () => Promise.resolve(), status: () => ({ busy: false, queued: 0, sessionId: "approval-session" }), dispose: () => Promise.resolve() }); } };
+    const router = new SuperuserRequestRouter({ superuserIds: ["owner-123"], privateChannelIds: ["private-channel"], defaultWorkingDirectoryAlias: "clank", workingDirectories: { clank: "/srv/clank/app" }, approvals: { expiresMs: 1_000, restartCommand: "sudo systemctl restart clank", privilegedExecution, destructiveConfirmation: true } }, discord, pi, store, undefined, now);
+    return { router, sent, executed, state: () => state };
+  }
+
+  it("binds an approval to exact task context and executes once after its owner approves", async () => {
+    const { router, sent, executed, state } = approvalHarness(); const run = router.route(request());
+    await vi.waitFor(() => { expect(sent.some((entry) => entry.approvalId !== undefined)).toBe(true); });
+    const approval = state().approvals[0]; if (approval === undefined) throw new Error("approval not persisted");
+    expect(sent.find((entry) => entry.approvalId === approval.id)?.content).toContain("sudo systemctl restart clank\nTask: message-1\nRequester: owner-123\nWorking directory: /srv/clank/app");
+    await expect(router.decideApproval({ approvalId: approval.id, taskId: "message-1", command: "sudo systemctl restart clank", userId: "owner-123", decision: "approve" })).resolves.toBe("approved");
+    await expect(run).resolves.toEqual({ kind: "completed", taskId: "message-1" }); expect(executed).toEqual(["sudo systemctl restart clank"]); expect(state().approvals[0]?.status).toBe("approved");
+    await expect(router.decideApproval({ approvalId: approval.id, taskId: "message-1", command: "sudo systemctl restart clank", userId: "owner-123", decision: "approve" })).resolves.toBe("unavailable");
+  });
+
+  it("rejects unauthorized, mutated, cross-task, denied, and expired decisions without execution", async () => {
+    const { router, sent, executed, state } = approvalHarness(); const run = router.route(request()); await vi.waitFor(() => { expect(sent.some((entry) => entry.approvalId !== undefined)).toBe(true); }); const approval = state().approvals[0]; if (approval === undefined) throw new Error("approval not persisted");
+    await expect(router.decideApproval({ approvalId: approval.id, taskId: "message-1", command: approval.command, userId: "intruder", decision: "approve" })).resolves.toBe("unauthorized");
+    await expect(router.decideApproval({ approvalId: approval.id, taskId: "message-1", command: `${approval.command} --changed`, userId: "owner-123", decision: "approve" })).resolves.toBe("mismatch");
+    await expect(router.decideApproval({ approvalId: approval.id, taskId: "other", command: approval.command, userId: "owner-123", decision: "approve" })).resolves.toBe("mismatch");
+    await expect(router.decideApproval({ approvalId: approval.id, taskId: "message-1", command: approval.command, userId: "owner-123", decision: "deny" })).resolves.toBe("denied"); await run; expect(executed).toEqual([]);
+  });
+
+  it("gates destructive and embedded privileged invocations conservatively", async () => {
+    const destructive = approvalHarness(undefined, "/bin/rm target --recursive"); const destructiveRun = destructive.router.route(request()); await vi.waitFor(() => { expect(destructive.state().approvals).toHaveLength(1); }); const destructiveApproval = destructive.state().approvals[0]; if (destructiveApproval === undefined) throw new Error("approval missing"); await destructive.router.decideApproval({ approvalId: destructiveApproval.id, taskId: "message-1", command: destructiveApproval.command, userId: "owner-123", decision: "deny" }); await destructiveRun; expect(destructive.executed).toEqual([]);
+    const disabledSudo = approvalHarness(undefined, "cd /tmp && /usr/bin/sudo id"); await disabledSudo.router.route(request()); expect(disabledSudo.executed).toEqual([]); expect(disabledSudo.state().approvals).toEqual([]);
+    const gatedSudo = approvalHarness(undefined, "echo ready; command sudo id", "approval-required"); const gatedRun = gatedSudo.router.route(request()); await vi.waitFor(() => { expect(gatedSudo.state().approvals).toHaveLength(1); }); const gatedApproval = gatedSudo.state().approvals[0]; if (gatedApproval === undefined) throw new Error("approval missing"); await gatedSudo.router.decideApproval({ approvalId: gatedApproval.id, taskId: "message-1", command: gatedApproval.command, userId: "owner-123", decision: "deny" }); await gatedRun; expect(gatedSudo.executed).toEqual([]);
+  });
+
+  it("expires pending approval on timeout and restart", async () => {
+    let time = Date.parse("2026-01-01T00:00:00.000Z"); const current = approvalHarness(() => time); const run = current.router.route(request()); await vi.waitFor(() => { expect(current.state().approvals).toHaveLength(1); }); time += 1_001; current.router.expireApprovals(); await run; expect(current.executed).toEqual([]); expect(current.state().approvals[0]?.status).toBe("expired");
   });
 });
 

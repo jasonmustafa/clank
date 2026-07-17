@@ -27,6 +27,7 @@ export interface V2Policy {
   pi: V2PiPolicy;
   lifecycle: { taskStatePath: string };
   attachments: { temporaryRoot: string; maxCount: number; maxInputBytesEach: number; maxInputBytesTotal: number; maxOutputBytesEach: number; maxOutputCount: number };
+  approvals: { expiresMs: number; destructiveConfirmation: boolean; restartCommand: string | null; privilegedExecution: "disabled" | "approval-required" };
 }
 
 export interface V2RuntimeConfig {
@@ -73,7 +74,8 @@ function validatePolicy(value: unknown, issues: string[]): V2Policy | undefined 
   const guildRateValue = objectValue(casualValue?.guildRateLimit, "discord.casual.guildRateLimit", issues);
   const lifecycleValue = objectValue(root?.lifecycle, "lifecycle", issues);
   const attachmentsValue = objectValue(root?.attachments, "attachments", issues);
-  if (root === undefined || discordValue === undefined || piValue === undefined || modelValue === undefined || casualValue === undefined || userRateValue === undefined || guildRateValue === undefined || lifecycleValue === undefined || attachmentsValue === undefined) return undefined;
+  const approvalsValue = objectValue(root?.approvals, "approvals", issues);
+  if (root === undefined || discordValue === undefined || piValue === undefined || modelValue === undefined || casualValue === undefined || userRateValue === undefined || guildRateValue === undefined || lifecycleValue === undefined || attachmentsValue === undefined || approvalsValue === undefined) return undefined;
 
   const superuserIds = stringArray(discordValue.superuserIds, "discord.superuserIds", issues);
   if (superuserIds.length === 0) issues.push("discord.superuserIds must contain at least one immutable Discord user ID");
@@ -81,6 +83,8 @@ function validatePolicy(value: unknown, issues: string[]): V2Policy | undefined 
   const thinkingLevel = stringValue(modelValue.thinkingLevel, "pi.model.thinkingLevel", issues);
   if (!THINKING_LEVELS.includes(thinkingLevel as ThinkingLevel)) issues.push("pi.model.thinkingLevel must be a supported Pi thinking level");
   const workingDirectories = absolutePathRecord(piValue.workingDirectories, "pi.workingDirectories", issues);
+  const privilegedExecution = stringValue(approvalsValue.privilegedExecution, "approvals.privilegedExecution", issues);
+  if (privilegedExecution !== "disabled" && privilegedExecution !== "approval-required") issues.push("approvals.privilegedExecution must be disabled or approval-required");
   const defaultWorkingDirectoryAlias = stringValue(piValue.defaultWorkingDirectoryAlias, "pi.defaultWorkingDirectoryAlias", issues);
   if (defaultWorkingDirectoryAlias !== "" && !Object.hasOwn(workingDirectories, defaultWorkingDirectoryAlias)) {
     issues.push("pi.defaultWorkingDirectoryAlias must name a configured working directory");
@@ -101,6 +105,12 @@ function validatePolicy(value: unknown, issues: string[]): V2Policy | undefined 
       },
     },
     lifecycle: { taskStatePath: absolutePath(lifecycleValue.taskStatePath, "lifecycle.taskStatePath", issues) },
+    approvals: {
+      expiresMs: positiveInteger(approvalsValue.expiresMs, "approvals.expiresMs", issues),
+      destructiveConfirmation: booleanValue(approvalsValue.destructiveConfirmation, "approvals.destructiveConfirmation", issues),
+      restartCommand: nullableString(approvalsValue.restartCommand, "approvals.restartCommand", issues),
+      privilegedExecution: privilegedExecution === "approval-required" ? "approval-required" : "disabled",
+    },
     attachments: {
       temporaryRoot: absolutePath(attachmentsValue.temporaryRoot, "attachments.temporaryRoot", issues),
       maxCount: positiveInteger(attachmentsValue.maxCount, "attachments.maxCount", issues),
@@ -165,6 +175,8 @@ function absolutePathRecord(value: unknown, path: string, issues: string[]): Rec
   return result;
 }
 
+function booleanValue(value: unknown, path: string, issues: string[]): boolean { if (typeof value !== "boolean") { issues.push(`${path} must be a boolean`); return false; } return value; }
+function nullableString(value: unknown, path: string, issues: string[]): string | null { if (value === null) return null; return nonEmptyString(value, path, issues) ?? null; }
 function positiveInteger(value: unknown, path: string, issues: string[]): number { if (!Number.isSafeInteger(value) || (value as number) <= 0) { issues.push(`${path} must be a positive integer`); return 1; } return value as number; }
 function boundedPositiveInteger(value: unknown, path: string, maximum: number, issues: string[]): number { const result = positiveInteger(value, path, issues); if (result > maximum) { issues.push(`${path} must not exceed ${String(maximum)}`); return maximum; } return result; }
 

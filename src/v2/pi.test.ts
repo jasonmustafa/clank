@@ -1,9 +1,9 @@
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AuthStorage, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { AuthStorage, ModelRegistry, type ExtensionAPI, type ToolCallEvent, type ToolCallEventResult } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
-import { constructCasualPiSession, constructSuperuserPiSession } from "./pi.js";
+import { constructCasualPiSession, constructSuperuserPiSession, createCommandApprovalExtension } from "./pi.js";
 
 async function temporaryDirectory(name: string): Promise<string> {
   return mkdtemp(join(tmpdir(), name));
@@ -35,6 +35,20 @@ describe("real superuser Pi construction", () => {
     expect(constructed.result.session.agent.state.systemPrompt).toContain("PROJECT_CONTEXT_MARKER");
     expect(constructed.result.session.agent.state.systemPrompt).toContain("GLOBAL_CONTEXT_MARKER");
     constructed.result.session.dispose();
+  });
+});
+
+describe("Discord command approval Pi hook", () => {
+  it("blocks Bash until the exact command is approved", async () => {
+    let handler: ((event: ToolCallEvent) => Promise<ToolCallEventResult | undefined>) | undefined; const commands: string[] = [];
+    const extension = createCommandApprovalExtension((command) => { commands.push(command); return Promise.resolve(command === "approved command"); });
+    const factory = typeof extension === "function" ? extension : extension.factory;
+    const api = { on(_event: string, candidate: (event: ToolCallEvent) => Promise<ToolCallEventResult | undefined>) { handler = candidate; } } as unknown as ExtensionAPI;
+    await factory(api);
+    if (handler === undefined) throw new Error("tool_call handler missing");
+    await expect(handler({ type: "tool_call", toolCallId: "one", toolName: "bash", input: { command: "denied command" } } as ToolCallEvent)).resolves.toMatchObject({ block: true });
+    await expect(handler({ type: "tool_call", toolCallId: "two", toolName: "bash", input: { command: "approved command" } } as ToolCallEvent)).resolves.toBeUndefined();
+    expect(commands).toEqual(["denied command", "approved command"]);
   });
 });
 

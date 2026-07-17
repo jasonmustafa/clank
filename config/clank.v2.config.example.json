@@ -15,6 +15,12 @@
   "lifecycle": {
     "taskStatePath": "/srv/clank/state/v2-tasks.json"
   },
+  "approvals": {
+    "expiresMs": 300000,
+    "destructiveConfirmation": true,
+    "restartCommand": "sudo systemctl restart clank.service",
+    "privilegedExecution": "disabled"
+  },
   "attachments": {
     "temporaryRoot": "/srv/clank/tmp/v2-attachments",
     "maxCount": 10,

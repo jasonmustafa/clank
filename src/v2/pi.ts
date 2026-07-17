@@ -8,6 +8,7 @@ import {
   SettingsManager,
   DefaultResourceLoader,
   type CreateAgentSessionResult,
+  type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
 import { mkdir } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
@@ -105,7 +106,7 @@ export class SdkSuperuserPiFactory implements SuperuserPiFactory {
     this.#options = options; this.#attachments = attachments;
   }
 
-  async create(options: { taskId: string; cwd: string; sessionId?: string }): Promise<SdkSuperuserPiSession> {
+  async create(options: { taskId: string; cwd: string; sessionId?: string; confirmCommand?: (command: string) => Promise<boolean> }): Promise<SdkSuperuserPiSession> {
     const constructed = await constructSuperuserPiSession(this.#options, options, this.#attachments);
     return new SdkSuperuserPiSession(constructed.result);
   }
@@ -113,7 +114,7 @@ export class SdkSuperuserPiFactory implements SuperuserPiFactory {
 
 export async function constructSuperuserPiSession(
   config: SuperuserPiOptions,
-  task: { taskId: string; cwd: string; sessionId?: string },
+  task: { taskId: string; cwd: string; sessionId?: string; confirmCommand?: (command: string) => Promise<boolean> },
   attachments?: TaskAttachmentBridge,
 ): Promise<ConstructedSuperuserPiSession> {
   const sessionDirectory = taskSessionDirectory(config.sessionsDirectory, task.taskId);
@@ -122,6 +123,9 @@ export async function constructSuperuserPiSession(
   const modelRegistry = ModelRegistry.create(authStorage, join(config.agentDir, "models.json"));
   const model = modelRegistry.find(config.model.provider, config.model.id);
   if (model === undefined) throw new Error(`Pi model not found: ${config.model.provider}/${config.model.id}`);
+  const settingsManager = SettingsManager.create(task.cwd, config.agentDir);
+  const extensionFactories: InlineExtension[] = task.confirmCommand === undefined ? [] : [createCommandApprovalExtension(task.confirmCommand)];
+  const resourceLoader = new DefaultResourceLoader({ cwd: task.cwd, agentDir: config.agentDir, settingsManager, extensionFactories }); await resourceLoader.reload();
   const result = await createAgentSession({
     cwd: task.cwd,
     agentDir: config.agentDir,
@@ -129,11 +133,15 @@ export async function constructSuperuserPiSession(
     modelRegistry,
     model,
     thinkingLevel: config.model.thinkingLevel,
+    settingsManager,
+    resourceLoader,
     sessionManager: sessionManagerForTask(task.cwd, sessionDirectory, task.sessionId),
     ...(attachments === undefined ? {} : { customTools: [createTaskDiscordAttachTool(attachments.outputFor(task.taskId))] }),
   });
   return { result, cwd: task.cwd, sessionDirectory };
 }
+
+export function createCommandApprovalExtension(confirmCommand: (command: string) => Promise<boolean>): InlineExtension { return { name: "discord-command-approval", factory: (pi) => { pi.on("tool_call", async (event) => { if (event.toolName !== "bash" || typeof event.input.command !== "string") return; const approved = await confirmCommand(event.input.command); return approved ? undefined : { block: true, reason: "Command was not approved in Discord and was not executed." }; }); } }; }
 
 function sessionManagerForTask(cwd: string, sessionDirectory: string, sessionId?: string): SessionManager {
   if (sessionId === undefined) return SessionManager.create(cwd, sessionDirectory);

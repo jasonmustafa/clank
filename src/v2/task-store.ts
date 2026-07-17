@@ -6,7 +6,7 @@ export interface PersistedTask {
   id: string; requesterId: string; threadId: string; capabilityMode: "superuser"; workingDirectory: string;
   lifecycleState: TaskLifecycleState; createdAt: string; updatedAt: string; piSessionId: string; recoveryNoticePending?: boolean;
 }
-export interface PersistedApproval { id: string; taskId: string; status: "pending" | "approved" | "denied" | "expired"; expiresAt: string; }
+export interface PersistedApproval { id: string; taskId: string; requesterId: string; command: string; workingDirectory: string; status: "pending" | "approved" | "denied" | "expired"; createdAt: string; expiresAt: string; decidedAt?: string; }
 export interface PersistedTaskState { version: 1; tasks: PersistedTask[]; approvals: PersistedApproval[]; }
 export interface TaskStore { load(): Promise<PersistedTaskState>; save(state: PersistedTaskState): Promise<void>; }
 
@@ -46,6 +46,6 @@ function isTask(value: unknown): boolean {
     && value.capabilityMode === "superuser" && ["active", "idle", "interrupted", "stopped"].includes(String(value.lifecycleState));
 }
 function isApproval(value: unknown): boolean {
-  return isObject(value) && typeof value.id === "string" && typeof value.taskId === "string" && typeof value.expiresAt === "string"
-    && ["pending", "approved", "denied", "expired"].includes(String(value.status));
+  return isObject(value) && ["id", "taskId", "requesterId", "command", "workingDirectory", "createdAt", "expiresAt"].every((key) => typeof value[key] === "string")
+    && (value.decidedAt === undefined || typeof value.decidedAt === "string") && ["pending", "approved", "denied", "expired"].includes(String(value.status));
 }

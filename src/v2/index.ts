@@ -14,6 +14,7 @@ export async function startV2(): Promise<void> {
     privateChannelIds: config.policy.discord.privateChannelIds,
     defaultWorkingDirectoryAlias: config.policy.pi.defaultWorkingDirectoryAlias,
     workingDirectories: config.policy.pi.workingDirectories,
+    approvals: config.policy.approvals,
   }, pi, { ...config.policy.discord.casual, superuserIds: config.policy.discord.superuserIds }, casualPi, new FileTaskStore(config.policy.lifecycle.taskStatePath), attachments);
   console.log(`clank v2 connected as ${gateway.client.user?.tag ?? "unknown user"}`);
   let shuttingDown = false;
