@@ -18,7 +18,7 @@
   "approvals": {
     "expiresMs": 300000,
     "destructiveConfirmation": true,
-    "restartCommand": "sudo systemctl restart clank.service",
+    "restartCommand": "sudo /usr/bin/systemctl --no-block restart clank-v2.service",
     "privilegedExecution": "disabled"
   },
   "attachments": {

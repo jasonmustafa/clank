@@ -90,7 +90,7 @@ V2 can pause destructive Bash calls and post the exact command, task, requester,
 The `approvals` policy separates three deployment choices:
 
 - `destructiveConfirmation` gates recognized ordinary destructive commands.
-- `restartCommand` permits one exact, approval-gated narrow service restart command (normally backed by a narrowly scoped root-owned sudoers/helper rule).
+- `restartCommand` permits one exact, approval-gated narrow service restart command (normally backed by a narrowly scoped root-owned sudoers/helper rule). Use a nonblocking systemd command so service shutdown does not deadlock waiting for the Pi task that requested it.
 - `privilegedExecution` is `disabled` by default. Setting it to `approval-required` gates general `sudo` commands but grants the Clank account effectively root-equivalent capability if passwordless sudo is also configured.
 
 > **Approval is a mistake-mitigation control, not a security sandbox.** It can stop an accidental model tool call, but cannot protect against compromised Clank code, a compromised model/dependency, or an account with general passwordless sudo. A compromised daemon can bypass its own confirmation UI. Prefer the exact restart capability, keep general privileged execution disabled, and treat any unrestricted passwordless sudo deployment as root-equivalent.
@@ -156,6 +156,8 @@ The unit deliberately leaves `/srv/clank/app` writable because owner-approved de
 3. From `/srv/clank/app`, run `mise install`, `npm ci`, `npm run check`, `npm test`, and `npm run build` via `mise exec`.
 4. Use owner-only `/clank rollback` for a recorded previous-good commit, or manually check out a reviewed commit and rebuild if Discord is unavailable.
 5. Re-register commands if interaction schemas or application/guild IDs changed, then restart. Running jobs are marked interrupted after restart and can resume from saved metadata/session state.
+
+Before production cutover, follow the [isolated self-improvement smoke-test runbook](docs/self-improvement-smoke-test.md). It covers the dedicated Discord bot/guild and disposable GitHub repository, the v2 systemd unit and narrow nonblocking restart grant, end-to-end evidence, failure drills, backup, and recovery.
 
 ## Local development
 

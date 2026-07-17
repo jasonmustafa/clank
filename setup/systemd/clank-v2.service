@@ -1,0 +1,25 @@
+[Unit]
+Description=Clank v2 isolated validation daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=clank
+Group=clank
+WorkingDirectory=/srv/clank/app
+Environment=HOME=/srv/clank
+Environment=CLANK_V2_CONFIG_PATH=/srv/clank/config/clank.v2.config.json
+EnvironmentFile=/etc/clank/clank.env
+ExecStart=/srv/clank/app/setup/systemd/run-clank-v2
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/srv/clank/state /srv/clank/pi-sessions-v2 /srv/clank/tmp /srv/clank/logs /srv/clank/app
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

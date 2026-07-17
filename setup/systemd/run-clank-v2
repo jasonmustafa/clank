@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+
+cd /srv/clank/app
+exec /usr/local/bin/mise exec -- node dist/v2/index.js
