@@ -42,8 +42,16 @@ describe("superuser task router", () => {
     expect(calls[0]).toMatch(/^thread:inspect-the-checkout · [a-f0-9]{8}$/u);
     expect(calls).toContain("create:message-1:/srv/clank/app");
     expect(sent).toContainEqual({ channelId: "thread-1", content: "⏳ Working…", kind: "preview" });
-    expect(sent).toContainEqual({ channelId: "thread-1", content: "⏳ Working…\n\nanswer:Inspect the checkout", kind: "preview" });
     expect(sent).toContainEqual({ channelId: "thread-1", content: "✅ Finished\n\nanswer:Inspect the checkout", kind: "final" });
+  });
+
+  it("drops superseded preview edits before sending the final response", async () => {
+    let releasePreview!: () => void; const previewGate = new Promise<void>((resolve) => { releasePreview = resolve; }); const previews: string[] = []; const finals: string[] = [];
+    const discord: DiscordTransport = { createThread: () => Promise.resolve("thread"), send: (_channel, content, options) => { if (options?.kind === "final") finals.push(content); return Promise.resolve(undefined); }, updatePreview: (_channel, content) => { previews.push(content); return previews.length === 1 ? previewGate : Promise.resolve(); } };
+    const pi: SuperuserPiFactory = { create: () => Promise.resolve({ prompt: (_text, _images, onProgress) => { for (let index = 0; index < 100; index += 1) onProgress?.({ kind: "text", text: String(index) }); return Promise.resolve("done"); }, followUp: () => Promise.resolve(), steer: () => Promise.resolve(), stop: () => Promise.resolve(), compact: () => Promise.resolve(), status: () => ({ busy: false, queued: 0, sessionId: "session" }), dispose: () => Promise.resolve() }) };
+    const router = new SuperuserRequestRouter({ superuserIds: ["owner-123"], privateChannelIds: ["private-channel"], defaultWorkingDirectoryAlias: "clank", workingDirectories: { clank: "/work" } }, discord, pi);
+    const run = router.route(request()); await vi.waitFor(() => { expect(previews).toEqual(["⏳ Working…"]); }); releasePreview(); await run;
+    expect(previews).toEqual(["⏳ Working…"]); expect(finals).toEqual(["✅ Finished\n\ndone"]);
   });
 
   it("selects a configured working directory and strips the selector from the prompt", async () => {
