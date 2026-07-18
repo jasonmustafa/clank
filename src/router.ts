@@ -117,4 +117,4 @@ function selectWorkingDirectory(content: string, policy: SuperuserRoutingPolicy)
   return { path, prompt: match?.[2]?.trim() ?? content };
 }
 
-export function makeTaskThreadName(taskId: string, content: string): string { const shortId = createHash("sha256").update(taskId).digest("hex").slice(0, 8); const concise = content.trim().split(/\s+/u).slice(0, 12).join(" "); const summary = concise.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/gu, "") || "task"; const suffix = `-${shortId}`; return `${summary.slice(0, 100 - suffix.length)}${suffix}`; }
+export function makeTaskThreadName(taskId: string, content: string): string { const shortId = createHash("sha256").update(taskId).digest("hex").slice(0, 8); const request = content.trim().replace(/^(?:<@!?\d+>\s*)+/u, ""); const concise = request.split(/\s+/u).slice(0, 12).join(" "); const summary = concise.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/gu, "") || "task"; const suffix = ` · ${shortId}`; return `${summary.slice(0, 100 - suffix.length)}${suffix}`; }
