@@ -18,7 +18,6 @@ export function normalizeDiscordMessage(message: DiscordMessageLike, application
 class DiscordJsTransport implements DiscordTransport {
   readonly #messages = new Map<string, Message>();
   readonly #previews = new Map<string, Message>();
-  readonly #typingTimers = new Map<string, NodeJS.Timeout>();
   readonly #client: Client;
   constructor(client: Client) { this.#client = client; }
   register(message: Message): void { this.#messages.set(message.id, message); }
@@ -43,16 +42,10 @@ class DiscordJsTransport implements DiscordTransport {
     if (preview === undefined) { const channel = await this.#textChannel(channelId); this.#previews.set(channelId, await channel.send(visible)); }
     else await preview.edit(visible);
   }
-  async setTyping(channelId: string, active: boolean): Promise<void> {
-    const oldTimer = this.#typingTimers.get(channelId); if (oldTimer !== undefined) clearInterval(oldTimer);
-    this.#typingTimers.delete(channelId); if (!active) return;
-    const channel = await this.#textChannel(channelId); await channel.sendTyping();
-    this.#typingTimers.set(channelId, setInterval(() => { void channel.sendTyping().catch(() => undefined); }, 8_000));
-  }
-  async #textChannel(channelId: string): Promise<{ send(content: string | MessageCreateOptions): Promise<Message>; sendTyping(): Promise<unknown> }> {
+  async #textChannel(channelId: string): Promise<{ send(content: string | MessageCreateOptions): Promise<Message> }> {
     const channel = await this.#client.channels.fetch(channelId);
-    if (channel === null || !channel.isTextBased() || !("send" in channel) || !("sendTyping" in channel)) throw new Error(`Discord channel ${channelId} cannot receive task output`);
-    return channel as unknown as { send(content: string | MessageCreateOptions): Promise<Message>; sendTyping(): Promise<unknown> };
+    if (channel === null || !channel.isTextBased() || !("send" in channel)) throw new Error(`Discord channel ${channelId} cannot receive task output`);
+    return channel as unknown as { send(content: string | MessageCreateOptions): Promise<Message> };
   }
 }
 export function createDiscordClient(): Client { return new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent], partials: [Partials.Channel] }); }
