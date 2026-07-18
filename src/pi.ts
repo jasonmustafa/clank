@@ -78,9 +78,10 @@ export class SdkSuperuserPiSession implements SuperuserPiSession {
         text += event.assistantMessageEvent.delta;
         onProgress?.({ kind: "text", text: event.assistantMessageEvent.delta });
       } else if (event.type === "tool_execution_start") {
-        onProgress?.({ kind: "tool", name: event.toolName, status: "started" });
+        const summary = summarizeToolCall(event.toolName, event.args);
+        onProgress?.({ kind: "tool", id: event.toolCallId, name: event.toolName, status: "started", ...(summary === undefined ? {} : { summary }) });
       } else if (event.type === "tool_execution_end") {
-        onProgress?.({ kind: "tool", name: event.toolName, status: "completed" });
+        onProgress?.({ kind: "tool", id: event.toolCallId, name: event.toolName, status: event.isError ? "failed" : "completed" });
       }
     });
     try {
@@ -139,6 +140,15 @@ export async function constructSuperuserPiSession(
     ...(attachments === undefined ? {} : { customTools: [createTaskDiscordAttachTool(attachments.outputFor(task.taskId))] }),
   });
   return { result, cwd: task.cwd, sessionDirectory };
+}
+
+export function summarizeToolCall(name: string, args: unknown): string | undefined {
+  if (typeof args !== "object" || args === null) return undefined;
+  const input = args as Record<string, unknown>;
+  const value = name === "bash" ? input.command : name === "read" || name === "write" || name === "edit" || name === "discord_attach" ? input.path : name === "web_search" ? input.query : name === "web_fetch" ? input.url : undefined;
+  if (typeof value !== "string" || value.trim() === "") return undefined;
+  const oneLine = value.replace(/\s+/gu, " ").trim();
+  return oneLine.length > 120 ? `${oneLine.slice(0, 117)}…` : oneLine;
 }
 
 export function createCommandApprovalExtension(confirmCommand: (command: string) => Promise<boolean>): InlineExtension { return { name: "discord-command-approval", factory: (pi) => { pi.on("tool_call", async (event) => { if (event.toolName !== "bash" || typeof event.input.command !== "string") return; const approved = await confirmCommand(event.input.command); return approved ? undefined : { block: true, reason: "Command was not approved in Discord and was not executed." }; }); } }; }

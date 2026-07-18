@@ -17,7 +17,7 @@ export function normalizeDiscordMessage(message: DiscordMessageLike, application
 
 class DiscordJsTransport implements DiscordTransport {
   readonly #messages = new Map<string, Message>();
-  readonly #previews = new Map<string, Message>();
+  readonly #previews = new Map<string, Message[]>();
   readonly #client: Client;
   constructor(client: Client) { this.#client = client; }
   register(message: Message): void { this.#messages.set(message.id, message); }
@@ -30,16 +30,18 @@ class DiscordJsTransport implements DiscordTransport {
   async send(channelId: string, content: string, options?: { kind?: "preview" | "status" | "final"; files?: readonly string[]; approval?: { id: string; taskId: string; command: string } }): Promise<string | undefined> {
     const chunks = chunkDiscordMessage(content);
     if (options?.kind === "final") {
-      const preview = this.#previews.get(channelId); this.#previews.delete(channelId);
+      const previews = this.#previews.get(channelId); this.#previews.delete(channelId); const preview = previews?.at(-1);
       if (preview !== undefined && chunks.length === 1 && (options.files?.length ?? 0) === 0 && options.approval === undefined) { await preview.edit(chunks[0] ?? "Task completed without text output."); return preview.id; }
       await preview?.delete().catch(() => undefined);
     }
     const channel = await this.#textChannel(channelId);
     let last: Message | undefined; for (const [index, chunk] of chunks.entries()) { const finalChunk = index === chunks.length - 1; const payload: MessageCreateOptions = { content: chunk, ...(finalChunk && (options?.files?.length ?? 0) > 0 ? { files: [...(options?.files ?? [])] } : {}), ...(finalChunk && options?.approval !== undefined ? { components: [approvalButtons(options.approval.id)] } : {}) }; last = await channel.send(payload); } return last?.id;
   }
-  async updatePreview(channelId: string, content: string): Promise<void> {
-    const preview = this.#previews.get(channelId); const visible = content === "" ? "…" : content;
-    if (preview === undefined) { const channel = await this.#textChannel(channelId); this.#previews.set(channelId, await channel.send(visible)); }
+  async updatePreview(channelId: string, content: string, page = 0): Promise<void> {
+    let previews = this.#previews.get(channelId); const visible = content === "" ? "…" : content;
+    if (previews === undefined) { previews = []; this.#previews.set(channelId, previews); }
+    const preview = previews[page];
+    if (preview === undefined) { const channel = await this.#textChannel(channelId); previews[page] = await channel.send(visible); }
     else await preview.edit(visible);
   }
   async #textChannel(channelId: string): Promise<{ send(content: string | MessageCreateOptions): Promise<Message> }> {
