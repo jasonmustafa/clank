@@ -40,7 +40,7 @@ describe("superuser task router", () => {
   it("creates a recognizable owned thread and streams the task result there", async () => {
     const { router, calls, sent } = harness();
     await expect(router.route(request())).resolves.toEqual({ kind: "completed", taskId: "message-1" });
-    expect(calls[0]).toMatch(/^thread:inspect-the-checkout-[a-f0-9]{8}$/u);
+    expect(calls[0]).toMatch(/^thread:inspect-the-checkout · [a-f0-9]{8}$/u);
     expect(calls).toContain("create:message-1:/srv/clank/app");
     expect(sent).toContainEqual({ channelId: "thread-1", content: "answer:Inspect the checkout", kind: "preview" });
     expect(sent).toContainEqual({ channelId: "thread-1", content: "answer:Inspect the checkout", kind: "final" });
@@ -182,10 +182,15 @@ describe("Discord command approvals", () => {
 });
 
 describe("task thread titles", () => {
+  it("puts the request first and strips leading Discord mentions", () => {
+    const title = makeTaskThreadName("message-123", "<@1519648634528989405> Review the deployment");
+    expect(title).toMatch(/^review-the-deployment · [a-f0-9]{8}$/u);
+  });
+
   it("truncates the summary while preserving the stable short identifier", () => {
     const title = makeTaskThreadName("message-123", "A ".repeat(100));
     expect(title.length).toBeLessThanOrEqual(100);
-    expect(title).toMatch(/-[a-f0-9]{8}$/u);
+    expect(title).toMatch(/ · [a-f0-9]{8}$/u);
     expect(makeTaskThreadName("message-123", "different words").slice(-8)).toBe(title.slice(-8));
   });
 });
