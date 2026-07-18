@@ -14,7 +14,7 @@ function harness(now = () => 100) {
   }
   const pi: CasualPiFactory = { create() { calls.push("create:casual"); return Promise.resolve(new Session()); } };
   const sent: { channel: string; content: string }[] = [];
-  const discord: DiscordTransport = { createThread: () => Promise.reject(new Error("unused")), send(channel, content) { sent.push({ channel, content }); return Promise.resolve(`bot-${String(++reply)}`); }, updatePreview: () => Promise.resolve(), setTyping: () => Promise.resolve() };
+  const discord: DiscordTransport = { createThread: () => Promise.reject(new Error("unused")), send(channel, content) { sent.push({ channel, content }); return Promise.resolve(`bot-${String(++reply)}`); }, updatePreview: () => Promise.resolve() };
   const router = new CasualRequestRouter({ allowedGuildIds: ["guild"], allowedChannelIds: ["casual"], superuserIds: ["owner"], continuationTtlMs: 1_000, maxContinuationTurns: 1, userRateLimit: { requests: 2, windowMs: 1_000 }, guildRateLimit: { requests: 2, windowMs: 1_000 } }, discord, pi, now);
   return { router, calls, sent };
 }
