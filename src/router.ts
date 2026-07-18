@@ -13,7 +13,7 @@ export interface ApprovalPolicy { expiresMs: number; destructiveConfirmation: bo
 export interface SuperuserRoutingPolicy { superuserIds: readonly string[]; privateChannelIds: readonly string[]; defaultWorkingDirectoryAlias: string; workingDirectories: Readonly<Record<string, string>>; approvals?: ApprovalPolicy; }
 export interface ApprovalDecision { approvalId: string; taskId: string; command: string; userId: string; decision: "approve" | "deny"; }
 export type RouteResult = { kind: "ignored" } | { kind: "accepted" | "completed"; taskId: string };
-interface Task { record: PersistedTask; session: SuperuserPiSession | undefined; generation: number; running: boolean; }
+interface Task { record: PersistedTask; session: SuperuserPiSession | undefined; generation: number; running: boolean; continuationQueue: Promise<void>; }
 
 export class SuperuserRequestRouter {
   readonly #tasks = new Map<string, Task>(); readonly #policy: SuperuserRoutingPolicy; readonly #discord: DiscordTransport; readonly #pi: SuperuserPiFactory; readonly #store: TaskStore | undefined; readonly #attachments: TaskAttachmentBridge | undefined;
@@ -27,7 +27,7 @@ export class SuperuserRequestRouter {
     for (const record of this.#state.tasks) {
       if (record.lifecycleState === "active") { record.lifecycleState = "interrupted"; record.recoveryNoticePending = true; record.updatedAt = new Date().toISOString(); }
       if (record.recoveryNoticePending === true) notices.push(record);
-      this.#tasks.set(record.threadId, { record, session: undefined, generation: 0, running: false });
+      this.#tasks.set(record.threadId, { record, session: undefined, generation: 0, running: false, continuationQueue: Promise.resolve() });
     }
     for (const approval of this.#state.approvals) if (approval.status === "pending") { approval.status = "expired"; approval.decidedAt = new Date(this.now()).toISOString(); }
     await this.#persist();
@@ -43,7 +43,7 @@ export class SuperuserRequestRouter {
     const threadId = request.location === "guild" ? await this.#discord.createThread(request.id, makeTaskThreadName(request.id, selection.prompt)) : request.channelId;
     let session: SuperuserPiSession; try { session = await this.#createSession({ taskId: request.id, requesterId: request.userId, threadId, cwd: selection.path }); } catch (error) { await this.#discord.send(threadId, `Could not start task: ${error instanceof Error ? error.message : String(error)}`, { kind: "status" }); throw error; }
     const now = new Date().toISOString(); const record: PersistedTask = { id: request.id, requesterId: request.userId, threadId, capabilityMode: "superuser", workingDirectory: selection.path, lifecycleState: "idle", createdAt: now, updatedAt: now, piSessionId: session.status().sessionId };
-    const task: Task = { record, session, generation: 0, running: false }; this.#tasks.set(threadId, task); this.#state.tasks.push(record); await this.#persist(); return this.#startRun(task, selection.prompt, request);
+    const task: Task = { record, session, generation: 0, running: true, continuationQueue: Promise.resolve() }; this.#tasks.set(threadId, task); this.#state.tasks.push(record); await this.#persist(); return this.#startRun(task, selection.prompt, request);
   }
 
   async shutdown(): Promise<void> {
@@ -57,7 +57,13 @@ export class SuperuserRequestRouter {
   }
 
   async #session(task: Task): Promise<SuperuserPiSession> { return task.session ??= await this.#createSession({ taskId: task.record.id, requesterId: task.record.requesterId, threadId: task.record.threadId, cwd: task.record.workingDirectory, sessionId: task.record.piSessionId }); }
-  async #continue(task: Task, request: DiscordRequest): Promise<RouteResult> {
+  #continue(task: Task, request: DiscordRequest): Promise<RouteResult> {
+    let resolve!: (result: RouteResult) => void; let reject!: (error: unknown) => void;
+    const result = new Promise<RouteResult>((res, rej) => { resolve = res; reject = rej; });
+    task.continuationQueue = task.continuationQueue.then(async () => { try { resolve(await this.#processContinuation(task, request)); } catch (error) { reject(error); } });
+    return result;
+  }
+  async #processContinuation(task: Task, request: DiscordRequest): Promise<RouteResult> {
     if (task.record.requesterId !== request.userId) return { kind: "ignored" }; const session = await this.#session(task); const text = request.content.trim(); const [command, ...rest] = text.split(/\s+/u);
     if (command === "/status") { const state = session.status(); const alias = Object.entries(this.#policy.workingDirectories).find(([, path]) => path === task.record.workingDirectory)?.[0] ?? "custom"; await this.#discord.send(task.record.threadId, `Task ${task.record.id}: ${state.busy ? "working" : "idle"}; ${String(state.queued)} queued; session ${state.sessionId}; directory ${alias} (${task.record.workingDirectory}).`, { kind: "status" }); }
     else if (command === "/stop") { this.#cancelTaskApprovals(task.record.id, "denied"); await session.stop(); task.record.lifecycleState = "stopped"; await this.#discord.send(task.record.threadId, "Stopped active work, cleared queued messages, and denied pending command approvals.", { kind: "status" }); }
@@ -68,11 +74,11 @@ export class SuperuserRequestRouter {
     task.record.updatedAt = new Date().toISOString(); await this.#persist(); return { kind: "accepted", taskId: task.record.id };
   }
 
-  #startRun(task: Task, prompt: string, request: DiscordRequest, ingested?: { prompt: string; images: readonly ImageContent[] }): Promise<RouteResult> { const run = this.#run(task, prompt, request, ingested); this.#activeRuns.add(run); void run.finally(() => this.#activeRuns.delete(run)).catch(() => undefined); return run; }
+  #startRun(task: Task, prompt: string, request: DiscordRequest, ingested?: { prompt: string; images: readonly ImageContent[] }): Promise<RouteResult> { task.running = true; const run = this.#run(task, prompt, request, ingested); this.#activeRuns.add(run); void run.finally(() => { task.running = false; this.#activeRuns.delete(run); }).catch(() => undefined); return run; }
   async #run(task: Task, prompt: string, request: DiscordRequest, supplied?: { prompt: string; images: readonly ImageContent[] }): Promise<RouteResult> {
-    const attachment = supplied ?? await this.#ingest(task, request); const session = await this.#session(task); const generation = task.generation; task.running = true; task.record.lifecycleState = "active"; task.record.updatedAt = new Date().toISOString(); await this.#persist(); await this.#discord.setTyping(task.record.threadId, true); let typing = true; const stopTyping = async () => { if (!typing) return; typing = false; await this.#discord.setTyping(task.record.threadId, false); }; let preview = ""; let previewUpdate = Promise.resolve();
+    const attachment = supplied ?? await this.#ingest(task, request); const session = await this.#session(task); const generation = task.generation; task.record.lifecycleState = "active"; task.record.updatedAt = new Date().toISOString(); await this.#persist(); await this.#discord.setTyping(task.record.threadId, true); let typing = true; const stopTyping = async () => { if (!typing) return; typing = false; await this.#discord.setTyping(task.record.threadId, false); }; let preview = ""; let previewUpdate = Promise.resolve();
     try { const response = await session.prompt(prompt + attachment.prompt, attachment.images, (event) => { if (event.kind === "text") { preview += event.text; previewUpdate = previewUpdate.then(() => this.#discord.updatePreview(task.record.threadId, preview.slice(-1_500))).catch(() => undefined); } else previewUpdate = previewUpdate.then(async () => { await this.#discord.send(task.record.threadId, `${event.status === "started" ? "Running" : "Finished"} ${event.name}`, { kind: "status" }); }).catch(() => undefined); }); await previewUpdate; if (task.generation === generation) { const files = this.#attachments?.outputFor(task.record.id).take() ?? []; try { await stopTyping(); await this.#discord.send(task.record.threadId, response || "Task completed without text output.", { kind: "final", files }); } finally { await this.#attachments?.cleanupFiles(files); } } return { kind: "completed", taskId: task.record.id }; }
-    finally { await stopTyping(); await this.#attachments?.cleanupInputs(task.record.id); task.running = false; task.record.lifecycleState = this.#shuttingDown ? "interrupted" : "idle"; if (this.#shuttingDown) task.record.recoveryNoticePending = true; else delete task.record.recoveryNoticePending; task.record.piSessionId = session.status().sessionId; task.record.updatedAt = new Date().toISOString(); await this.#persist(); }
+    finally { await stopTyping(); await this.#attachments?.cleanupInputs(task.record.id); task.record.lifecycleState = this.#shuttingDown ? "interrupted" : "idle"; if (this.#shuttingDown) task.record.recoveryNoticePending = true; else delete task.record.recoveryNoticePending; task.record.piSessionId = session.status().sessionId; task.record.updatedAt = new Date().toISOString(); await this.#persist(); }
   }
   async #ingest(task: Task, request: DiscordRequest): Promise<{ prompt: string; images: readonly ImageContent[] }> { if (this.#attachments === undefined || request.attachments.length === 0) return { prompt: "", images: [] }; const result = await this.#attachments.ingest(task.record.id, request.id, request.attachments); for (const error of result.errors) await this.#discord.send(task.record.threadId, `Attachment rejected: ${error}`, { kind: "status" }); return { prompt: result.prompt, images: result.images }; }
   async handleApprovalAction(input: { approvalId: string; userId: string; decision: "approve" | "deny" }): Promise<"approved" | "denied" | "unauthorized" | "unavailable"> { const approval = this.#state.approvals.find(({ id }) => id === input.approvalId); if (approval === undefined) return "unavailable"; const result = await this.decideApproval({ ...input, taskId: approval.taskId, command: approval.command }); return result === "mismatch" ? "unavailable" : result; }
