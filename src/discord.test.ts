@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { normalizeDiscordMessage } from "./discord.js";
 
-describe("v2 Discord normalization", () => {
+describe("Discord normalization", () => {
   it("copies immutable identity and origin fields from a guild message", () => {
     expect(normalizeDiscordMessage({ id: "message-id", author: { id: "user-id", bot: false }, channelId: "channel-id", guildId: "guild-id", content: "hello", attachments: new Map(), webhookId: "webhook-id", channel: { isThread: () => false }, inGuild: () => true })).toEqual({
       id: "message-id", userId: "user-id", channelId: "channel-id", threadId: null, guildId: "guild-id", location: "guild", content: "hello", attachments: [], authorIsBot: false, webhookId: "webhook-id", replyToMessageId: null, mentionsApplication: false,

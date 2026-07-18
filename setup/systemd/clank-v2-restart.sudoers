@@ -1,2 +1,0 @@
-Defaults!/usr/bin/systemctl env_reset
-clank ALL=(root) NOPASSWD: /usr/bin/systemctl --no-block restart clank-v2.service

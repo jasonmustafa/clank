@@ -26,4 +26,11 @@ describe("file task store", () => {
     await writeFile(path, JSON.stringify({ version: 99, tasks: [], approvals: [] }));
     await expect(new FileTaskStore(path).load()).rejects.toBeInstanceOf(IncompatibleTaskStateError);
   });
+
+  it("rejects legacy job state instead of silently starting empty", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "clank-state-")); const path = join(directory, "tasks.json");
+    await writeFile(path, JSON.stringify({ version: 1, jobs: [{ id: "legacy-job" }] }));
+
+    await expect(new FileTaskStore(path).load()).rejects.toThrow(IncompatibleTaskStateError);
+  });
 });

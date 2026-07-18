@@ -14,12 +14,11 @@ EnvironmentFile=/etc/clank/clank.env
 ExecStart=/srv/clank/app/setup/systemd/run-clank
 Restart=on-failure
 RestartSec=5s
-# Required for the exact, no-argument sudoers-allowlisted Clank helpers.
 NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/srv/clank/state /srv/clank/workspaces /srv/clank/pi-sessions /srv/clank/tmp /srv/clank/resources /srv/clank/logs
+ReadWritePaths=/srv/clank/state /srv/clank/pi-sessions /srv/clank/tmp /srv/clank/logs /srv/clank/app
 UMask=0027
 
 [Install]

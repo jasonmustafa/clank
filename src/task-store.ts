@@ -24,6 +24,7 @@ export class FileTaskStore implements TaskStore {
       throw new CorruptTaskStateError(`Task state is corrupt: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (!isObject(value) || value.version !== 1) throw new IncompatibleTaskStateError("Task state version is incompatible");
+    if (Array.isArray(value.jobs)) throw new IncompatibleTaskStateError("Legacy job state is incompatible; follow the cutover backup and recovery procedure");
     if (!Array.isArray(value.tasks) || !value.tasks.every(isTask) || !Array.isArray(value.approvals) || !value.approvals.every(isApproval)) {
       throw new CorruptTaskStateError("Task state is corrupt: invalid document shape");
     }

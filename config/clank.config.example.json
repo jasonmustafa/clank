@@ -1,73 +1,48 @@
 {
   "discord": {
     "applicationId": "<discord-application-id>",
-    "guildId": "<discord-guild-id>",
-    "ownerUserIds": ["<discord-owner-user-id>"],
-    "workUserIds": ["<discord-work-user-id>"],
-    "workRoleIds": ["<discord-work-role-id>"],
-    "privilegedApproverUserIds": ["<discord-privileged-approver-user-id>"],
-    "workChannelIds": ["<discord-work-channel-id>"],
-    "elevatedChannelIds": ["<discord-elevated-channel-id>"],
-    "casualGuildIds": ["<discord-casual-guild-id>"],
-    "casualDeniedChannelIds": ["<discord-casual-denied-channel-id>"],
-    "casualContextMessages": 5,
-    "casualContinuationTtlMs": 300000,
-    "casualUserRateLimit": { "requests": 5, "windowMs": 60000 },
-    "casualGuildRateLimit": { "requests": 20, "windowMs": 60000 }
-  },
-  "github": {
-    "allowedOwners": ["<github-owner>"],
-    "allowedRepositories": ["<github-owner>/<github-repository>"],
-    "commitAuthorName": "<git-author-name>",
-    "commitAuthorEmail": "<github-verified-or-noreply-email>",
-    "commitFooter": "Generated-by: Clank, <owner's clanker>",
-    "defaultBaseBranch": "main",
-    "maxChangedFiles": 100,
-    "maxChangedLines": 5000,
-    "maxDiffBytes": 1000000
-  },
-  "workspaces": [
-    {
-      "aliases": ["<repo-alias>"],
-      "repository": "<github-owner>/<github-repository>",
-      "canonicalPath": "<absolute-read-only-canonical-path>"
-    }
-  ],
-  "resources": [
-    {
-      "id": "<trusted-resource-name>",
-      "repo": "https://github.com/<owner>/<resource-repository>.git",
-      "ref": "<pinned-tag-branch-or-commit>",
-      "skills": ["skills/*/SKILL.md"],
-      "prompts": ["prompts/*.md"],
-      "extensions": ["extensions/*.ts"]
-    }
-  ],
-  "deployment": {
-    "appPath": "/srv/clank/app",
-    "remote": "origin",
-    "branch": "main",
-    "checks": {
-      "install": ["npm", "ci"],
-      "typecheck": ["npm", "run", "check"],
-      "tests": ["npm", "test"],
-      "build": ["npm", "run", "build"],
-      "registerCommands": ["npm", "run", "register-commands"]
+    "superuserIds": ["<immutable-discord-user-id>"],
+    "privateChannelIds": ["<private-discord-channel-id>"],
+    "casual": {
+      "allowedGuildIds": ["<casual-guild-id>"],
+      "allowedChannelIds": ["<casual-channel-id>"],
+      "continuationTtlMs": 300000,
+      "maxContinuationTurns": 3,
+      "userRateLimit": { "requests": 5, "windowMs": 60000 },
+      "guildRateLimit": { "requests": 20, "windowMs": 60000 }
     }
   },
   "lifecycle": {
-    "runnerIdleTtlMs": 900000,
-    "cleanupRetentionMs": 2592000000
+    "taskStatePath": "/srv/clank/state/tasks.json"
   },
-  "safety": {
-    "normalWork": { "confirmWorkspaceDestructive": true },
-    "elevatedWork": { "confirmWorkspaceDestructive": false }
+  "approvals": {
+    "expiresMs": 300000,
+    "destructiveConfirmation": true,
+    "restartCommand": "sudo /usr/bin/systemctl --no-block restart clank.service",
+    "privilegedExecution": "disabled"
   },
-  "paths": {
-    "state": "<absolute-state-directory>",
-    "workspaces": "<absolute-workspaces-directory>",
-    "sessions": "<absolute-sessions-directory>",
-    "temporary": "<absolute-temporary-directory>",
-    "resources": "<absolute-trusted-resource-checkout-directory>"
+  "attachments": {
+    "temporaryRoot": "/srv/clank/tmp/attachments",
+    "maxCount": 10,
+    "maxInputBytesEach": 10485760,
+    "maxInputBytesTotal": 26214400,
+    "maxOutputBytesEach": 10485760,
+    "maxOutputCount": 10
+  },
+  "pi": {
+    "agentDir": "/srv/clank/.pi/agent",
+    "sessionsDirectory": "/srv/clank/pi-sessions",
+    "casualAgentDir": "/srv/clank/.pi/casual-agent",
+    "casualIsolationDirectory": "/srv/clank/casual-isolation",
+    "defaultWorkingDirectoryAlias": "clank",
+    "workingDirectories": {
+      "clank": "/srv/clank/app",
+      "docs": "/srv/clank/docs"
+    },
+    "model": {
+      "provider": "<pi-provider>",
+      "id": "<pi-model-id>",
+      "thinkingLevel": "high"
+    }
   }
 }

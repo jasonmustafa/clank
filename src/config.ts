@@ -2,17 +2,17 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { readFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 
-const DEFAULT_CONFIG_PATH = "/srv/clank/config/clank.v2.config.json";
+const DEFAULT_CONFIG_PATH = "/srv/clank/config/clank.config.json";
 const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-export interface V2DiscordPolicy {
+export interface DiscordPolicy {
   applicationId: string;
   superuserIds: string[];
   privateChannelIds: string[];
   casual: { allowedGuildIds: string[]; allowedChannelIds: string[]; continuationTtlMs: number; maxContinuationTurns: number; userRateLimit: { requests: number; windowMs: number }; guildRateLimit: { requests: number; windowMs: number } };
 }
 
-export interface V2PiPolicy {
+export interface PiPolicy {
   agentDir: string;
   sessionsDirectory: string;
   casualAgentDir: string;
@@ -22,36 +22,36 @@ export interface V2PiPolicy {
   model: { provider: string; id: string; thinkingLevel: ThinkingLevel };
 }
 
-export interface V2Policy {
-  discord: V2DiscordPolicy;
-  pi: V2PiPolicy;
+export interface Policy {
+  discord: DiscordPolicy;
+  pi: PiPolicy;
   lifecycle: { taskStatePath: string };
   attachments: { temporaryRoot: string; maxCount: number; maxInputBytesEach: number; maxInputBytesTotal: number; maxOutputBytesEach: number; maxOutputCount: number };
   approvals: { expiresMs: number; destructiveConfirmation: boolean; restartCommand: string | null; privilegedExecution: "disabled" | "approval-required" };
 }
 
-export interface V2RuntimeConfig {
+export interface RuntimeConfig {
   secrets: { discordToken: string };
-  policy: V2Policy;
+  policy: Policy;
 }
 
-export class V2ConfigValidationError extends Error {
+export class ConfigValidationError extends Error {
   readonly issues: readonly string[];
 
   constructor(issues: readonly string[]) {
-    super(`Invalid Clank v2 configuration:\n- ${issues.join("\n- ")}`);
-    this.name = "V2ConfigValidationError";
+    super(`Invalid Clank configuration:\n- ${issues.join("\n- ")}`);
+    this.name = "ConfigValidationError";
     this.issues = issues;
   }
 }
 
-export async function loadV2Config(options: { path?: string; env?: NodeJS.ProcessEnv } = {}): Promise<V2RuntimeConfig> {
+export async function loadConfig(options: { path?: string; env?: NodeJS.ProcessEnv } = {}): Promise<RuntimeConfig> {
   const env = options.env ?? process.env;
   const tokenValue = env.CLANK_DISCORD_TOKEN;
   delete env.CLANK_DISCORD_TOKEN;
   const issues: string[] = [];
   const discordToken = nonEmptyString(tokenValue, "CLANK_DISCORD_TOKEN", issues);
-  const path = options.path ?? env.CLANK_V2_CONFIG_PATH ?? DEFAULT_CONFIG_PATH;
+  const path = options.path ?? env.CLANK_CONFIG_PATH ?? DEFAULT_CONFIG_PATH;
   let document: unknown;
   try {
     document = JSON.parse(await readFile(path, "utf8")) as unknown;
@@ -60,12 +60,13 @@ export async function loadV2Config(options: { path?: string; env?: NodeJS.Proces
     issues.push(`config file ${path} could not be read as JSON: ${detail}`);
   }
   const policy = validatePolicy(document, issues);
-  if (discordToken === undefined || policy === undefined || issues.length > 0) throw new V2ConfigValidationError(issues);
+  if (discordToken === undefined || policy === undefined || issues.length > 0) throw new ConfigValidationError(issues);
   return { secrets: { discordToken }, policy };
 }
 
-function validatePolicy(value: unknown, issues: string[]): V2Policy | undefined {
+function validatePolicy(value: unknown, issues: string[]): Policy | undefined {
   const root = objectValue(value, "config", issues);
+  rejectUnknownKeys(root, ["discord", "pi", "lifecycle", "attachments", "approvals"], "config", issues);
   const discordValue = objectValue(root?.discord, "discord", issues);
   const piValue = objectValue(root?.pi, "pi", issues);
   const modelValue = objectValue(piValue?.model, "pi.model", issues);
@@ -133,6 +134,11 @@ function validatePolicy(value: unknown, issues: string[]): V2Policy | undefined 
       },
     },
   };
+}
+
+function rejectUnknownKeys(value: Record<string, unknown> | undefined, allowed: readonly string[], path: string, issues: string[]): void {
+  if (value === undefined) return;
+  for (const key of Object.keys(value)) if (!allowed.includes(key)) issues.push(`${path}.${key} is not supported`);
 }
 
 function objectValue(value: unknown, path: string, issues: string[]): Record<string, unknown> | undefined {

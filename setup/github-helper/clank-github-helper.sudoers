@@ -1,2 +1,0 @@
-Defaults!/usr/local/lib/clank/github-helper env_reset
-clank ALL=(root) NOPASSWD: /usr/local/lib/clank/github-helper ""

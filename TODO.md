@@ -1,3 +1,2 @@
 - [ ] should tests be in a separate directory?
-- [ ] update README
 - [ ] interface with tmux needed?

@@ -5,10 +5,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { TaskAttachmentBridge } from "./attachments.js";
 
 const roots: string[] = [];
-async function root(): Promise<string> { const value = await mkdtemp(join(tmpdir(), "clank-v2-attachments-")); roots.push(value); return value; }
+async function root(): Promise<string> { const value = await mkdtemp(join(tmpdir(), "clank-attachments-")); roots.push(value); return value; }
 afterEach(async () => Promise.all(roots.splice(0).map((value) => rm(value, { recursive: true, force: true }))));
 
-describe("v2 task attachment bridge", () => {
+describe("task attachment bridge", () => {
   it("sanitizes supported text and images into isolated task storage", async () => {
     const temporaryRoot = await root();
     const bridge = new TaskAttachmentBridge({ temporaryRoot, maxCount: 3, maxInputBytesEach: 100, maxInputBytesTotal: 200 });

@@ -2,7 +2,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { V2ConfigValidationError, loadV2Config } from "./config.js";
+import { ConfigValidationError, loadConfig } from "./config.js";
 
 const policy = {
   discord: {
@@ -11,12 +11,12 @@ const policy = {
     privateChannelIds: ["private-channel"],
     casual: { allowedGuildIds: ["guild"], allowedChannelIds: ["casual"], continuationTtlMs: 300_000, maxContinuationTurns: 3, userRateLimit: { requests: 5, windowMs: 60_000 }, guildRateLimit: { requests: 20, windowMs: 60_000 } },
   },
-  lifecycle: { taskStatePath: "/srv/clank/state/v2-tasks.json" },
+  lifecycle: { taskStatePath: "/srv/clank/state/tasks.json" },
   approvals: { expiresMs: 300_000, destructiveConfirmation: true, restartCommand: "sudo systemctl restart clank.service", privilegedExecution: "disabled" },
-  attachments: { temporaryRoot: "/srv/clank/tmp/v2-attachments", maxCount: 10, maxInputBytesEach: 10_000, maxInputBytesTotal: 20_000, maxOutputBytesEach: 10_000, maxOutputCount: 10 },
+  attachments: { temporaryRoot: "/srv/clank/tmp/attachments", maxCount: 10, maxInputBytesEach: 10_000, maxInputBytesTotal: 20_000, maxOutputBytesEach: 10_000, maxOutputCount: 10 },
   pi: {
     agentDir: "/srv/clank/.pi/agent",
-    sessionsDirectory: "/srv/clank/pi-sessions-v2",
+    sessionsDirectory: "/srv/clank/pi-sessions",
     casualAgentDir: "/srv/clank/.pi/casual-agent",
     casualIsolationDirectory: "/srv/clank/casual-isolation",
     defaultWorkingDirectoryAlias: "clank",
@@ -26,21 +26,27 @@ const policy = {
 };
 
 async function configFile(value: unknown = policy): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "clank-v2-config-"));
+  const directory = await mkdtemp(join(tmpdir(), "clank-config-"));
   const path = join(directory, "config.json");
   await writeFile(path, JSON.stringify(value));
   return path;
 }
 
-describe("v2 configuration", () => {
+describe("configuration", () => {
   it("loads deployment-specific Discord and Pi values while keeping the token in the environment", async () => {
     const path = await configFile();
     const env = { CLANK_DISCORD_TOKEN: "discord-secret" };
 
-    const config = await loadV2Config({ path, env });
+    const config = await loadConfig({ path, env });
 
     expect(config).toEqual({ secrets: { discordToken: "discord-secret" }, policy });
     expect(env.CLANK_DISCORD_TOKEN).toBeUndefined();
+  });
+
+  it("rejects obsolete policy keys so removed restrictions cannot appear active", async () => {
+    const path = await configFile({ ...policy, github: { allowedRepositories: ["owner/repository"] } });
+
+    await expect(loadConfig({ path, env: { CLANK_DISCORD_TOKEN: "discord-secret" } })).rejects.toThrow(/config.github is not supported/u);
   });
 
   it("rejects missing identities, relative paths, and invalid model settings without leaking secrets", async () => {
@@ -61,8 +67,8 @@ describe("v2 configuration", () => {
     });
     const secret = "must-not-leak";
 
-    await expect(loadV2Config({ path, env: { CLANK_DISCORD_TOKEN: secret } })).rejects.toSatisfy((error: unknown) => {
-      expect(error).toBeInstanceOf(V2ConfigValidationError);
+    await expect(loadConfig({ path, env: { CLANK_DISCORD_TOKEN: secret } })).rejects.toSatisfy((error: unknown) => {
+      expect(error).toBeInstanceOf(ConfigValidationError);
       const message = error instanceof Error ? error.message : String(error);
       expect(message).toContain("discord.superuserIds");
       expect(message).toContain("pi.workingDirectories.clank");

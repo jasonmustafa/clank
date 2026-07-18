@@ -1,8 +1,0 @@
-/srv/clank/logs/helper-audit.log {
-  weekly
-  rotate 12
-  compress
-  missingok
-  notifempty
-  create 0640 root clank
-}

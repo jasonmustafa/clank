@@ -1,5 +1,5 @@
 import { ActionRowBuilder, ButtonBuilder, ButtonStyle, Client, GatewayIntentBits, Partials, type Message, type MessageCreateOptions } from "discord.js";
-import { chunkDiscordMessage } from "../formatting/index.js";
+import { chunkDiscordMessage } from "./formatting/index.js";
 import { SuperuserRequestRouter, type DiscordRequest, type DiscordTransport, type SuperuserPiFactory, type SuperuserRoutingPolicy } from "./router.js";
 import type { TaskStore } from "./task-store.js";
 import type { TaskAttachmentBridge } from "./attachments.js";
@@ -50,15 +50,15 @@ class DiscordJsTransport implements DiscordTransport {
     return channel as unknown as { send(content: string | MessageCreateOptions): Promise<Message>; sendTyping(): Promise<unknown> };
   }
 }
-export function createV2DiscordClient(): Client { return new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent], partials: [Partials.Channel] }); }
-export interface V2DiscordGateway { client: Client; shutdown(): Promise<void>; }
-export async function startV2DiscordGateway(discordToken: string, applicationId: string, policy: SuperuserRoutingPolicy, pi: SuperuserPiFactory, casualPolicy: CasualRoutingPolicy, casualPi: CasualPiFactory, store?: TaskStore, attachments?: TaskAttachmentBridge): Promise<V2DiscordGateway> {
-  const client = createV2DiscordClient(); const transport = new DiscordJsTransport(client); const router = new SuperuserRequestRouter(policy, transport, pi, store, attachments); const casual = new CasualRequestRouter(casualPolicy, transport, casualPi);
+export function createDiscordClient(): Client { return new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.DirectMessages, GatewayIntentBits.MessageContent], partials: [Partials.Channel] }); }
+export interface DiscordGateway { client: Client; shutdown(): Promise<void>; }
+export async function startDiscordGateway(discordToken: string, applicationId: string, policy: SuperuserRoutingPolicy, pi: SuperuserPiFactory, casualPolicy: CasualRoutingPolicy, casualPi: CasualPiFactory, store?: TaskStore, attachments?: TaskAttachmentBridge): Promise<DiscordGateway> {
+  const client = createDiscordClient(); const transport = new DiscordJsTransport(client); const router = new SuperuserRequestRouter(policy, transport, pi, store, attachments); const casual = new CasualRequestRouter(casualPolicy, transport, casualPi);
   client.on("interactionCreate", (interaction) => { if (!interaction.isButton() || !interaction.customId.startsWith("clank-approval:")) return; const [, decision, approvalId] = interaction.customId.split(":"); if ((decision !== "approve" && decision !== "deny") || approvalId === undefined) return; void router.handleApprovalAction({ approvalId, userId: interaction.user.id, decision }).then(async (result) => { await interaction.reply({ content: approvalInteractionMessage(result), ephemeral: true }); }).catch((error: unknown) => { console.error(`Failed to decide approval ${approvalId}: ${error instanceof Error ? error.message : String(error)}`); }); });
   client.on("messageCreate", (message) => {
     transport.register(message);
     const request = normalizeDiscordMessage(message, applicationId);
-    void (async () => { const result = await router.route(request); if (result.kind === "ignored") await casual.route(request); })().catch((error: unknown) => { console.error(`Failed to route v2 Discord message ${message.id}: ${error instanceof Error ? error.message : String(error)}`); })
+    void (async () => { const result = await router.route(request); if (result.kind === "ignored") await casual.route(request); })().catch((error: unknown) => { console.error(`Failed to route Discord message ${message.id}: ${error instanceof Error ? error.message : String(error)}`); })
       .finally(() => { transport.unregister(message.id); });
   });
   await client.login(discordToken); await router.initialize();

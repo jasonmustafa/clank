@@ -11,7 +11,7 @@ async function temporaryDirectory(name: string): Promise<string> {
 
 describe("real superuser Pi construction", () => {
   it("uses the requested cwd, persistent task directory, normal resources, and standard full-capability tools without a live model call", async () => {
-    const root = await temporaryDirectory("clank-v2-pi-");
+    const root = await temporaryDirectory("clank-pi-");
     const cwd = join(root, "checkout");
     const agentDir = join(root, "agent");
     const sessionsDirectory = join(root, "sessions");
@@ -54,7 +54,7 @@ describe("Discord command approval Pi hook", () => {
 
 describe("real casual Pi construction", () => {
   it("has only bounded web tools and no project or global context, skills, prompts, extensions, helpers, or persisted owner session", async () => {
-    const root = await temporaryDirectory("clank-v2-casual-pi-");
+    const root = await temporaryDirectory("clank-casual-pi-");
     const agentDir = join(root, "agent"); const cwd = join(root, "empty");
     await mkdir(agentDir); await mkdir(cwd);
     await writeFile(join(agentDir, "AGENTS.md"), "SECRET_GLOBAL_CONTEXT"); await writeFile(join(cwd, "AGENTS.md"), "SECRET_PROJECT_CONTEXT");
