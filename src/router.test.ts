@@ -28,7 +28,7 @@ function harness() {
   let threadCount = 0;
   const discord: DiscordTransport = {
     createThread(_requestId, name) { calls.push(`thread:${name}`); threadCount += 1; return Promise.resolve(`thread-${String(threadCount)}`); },
-    send(channelId, content, options) { sent.push({ channelId, content, kind: options?.kind }); return Promise.resolve(undefined); },
+    send(channelId, content, options) { calls.push(`send:${channelId}:${options?.kind ?? "default"}`); sent.push({ channelId, content, kind: options?.kind }); return Promise.resolve(undefined); },
     updatePreview(channelId, content) { sent.push({ channelId, content, kind: "preview" }); return Promise.resolve(); },
     setTyping(channelId, active) { calls.push(`typing:${channelId}:${String(active)}`); return Promise.resolve(); },
   };
@@ -44,6 +44,8 @@ describe("superuser task router", () => {
     expect(calls).toContain("create:message-1:/srv/clank/app");
     expect(sent).toContainEqual({ channelId: "thread-1", content: "answer:Inspect the checkout", kind: "preview" });
     expect(sent).toContainEqual({ channelId: "thread-1", content: "answer:Inspect the checkout", kind: "final" });
+    expect(calls.indexOf("typing:thread-1:false")).toBeLessThan(calls.indexOf("send:thread-1:final"));
+    expect(calls.filter((call) => call === "typing:thread-1:false")).toHaveLength(1);
   });
 
   it("selects a configured working directory and strips the selector from the prompt", async () => {
