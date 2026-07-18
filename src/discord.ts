@@ -29,9 +29,14 @@ class DiscordJsTransport implements DiscordTransport {
     const thread = await message.startThread({ name, autoArchiveDuration: 1440 }); return thread.id;
   }
   async send(channelId: string, content: string, options?: { kind?: "preview" | "status" | "final"; files?: readonly string[]; approval?: { id: string; taskId: string; command: string } }): Promise<string | undefined> {
-    if (options?.kind === "final") { const preview = this.#previews.get(channelId); this.#previews.delete(channelId); await preview?.delete().catch(() => undefined); }
+    const chunks = chunkDiscordMessage(content);
+    if (options?.kind === "final") {
+      const preview = this.#previews.get(channelId); this.#previews.delete(channelId);
+      if (preview !== undefined && chunks.length === 1 && (options.files?.length ?? 0) === 0 && options.approval === undefined) { await preview.edit(chunks[0] ?? "Task completed without text output."); return preview.id; }
+      await preview?.delete().catch(() => undefined);
+    }
     const channel = await this.#textChannel(channelId);
-    const chunks = chunkDiscordMessage(content); let last: Message | undefined; for (const [index, chunk] of chunks.entries()) { const finalChunk = index === chunks.length - 1; const payload: MessageCreateOptions = { content: chunk, ...(finalChunk && (options?.files?.length ?? 0) > 0 ? { files: [...(options?.files ?? [])] } : {}), ...(finalChunk && options?.approval !== undefined ? { components: [approvalButtons(options.approval.id)] } : {}) }; last = await channel.send(payload); } return last?.id;
+    let last: Message | undefined; for (const [index, chunk] of chunks.entries()) { const finalChunk = index === chunks.length - 1; const payload: MessageCreateOptions = { content: chunk, ...(finalChunk && (options?.files?.length ?? 0) > 0 ? { files: [...(options?.files ?? [])] } : {}), ...(finalChunk && options?.approval !== undefined ? { components: [approvalButtons(options.approval.id)] } : {}) }; last = await channel.send(payload); } return last?.id;
   }
   async updatePreview(channelId: string, content: string): Promise<void> {
     const preview = this.#previews.get(channelId); const visible = content === "" ? "…" : content;

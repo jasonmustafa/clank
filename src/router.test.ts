@@ -10,7 +10,7 @@ function request(overrides: Partial<DiscordRequest> = {}): DiscordRequest {
   return { id: "message-1", userId: "owner-123", channelId: "private-channel", threadId: null, guildId: "guild-1", location: "guild", content: "Inspect the checkout", attachments: [], authorIsBot: false, webhookId: null, replyToMessageId: null, mentionsApplication: false, ...overrides };
 }
 
-function harness() {
+function harness(store?: TaskStore) {
   const calls: string[] = [];
   const sessions: FakeSession[] = [];
   class FakeSession implements SuperuserPiSession {
@@ -32,7 +32,7 @@ function harness() {
     updatePreview(channelId, content) { sent.push({ channelId, content, kind: "preview" }); return Promise.resolve(); },
     setTyping(channelId, active) { calls.push(`typing:${channelId}:${String(active)}`); return Promise.resolve(); },
   };
-  const router = new SuperuserRequestRouter({ superuserIds: ["owner-123"], privateChannelIds: ["private-channel"], defaultWorkingDirectoryAlias: "clank", workingDirectories: { clank: "/srv/clank/app", docs: "/srv/clank/docs" } }, discord, pi);
+  const router = new SuperuserRequestRouter({ superuserIds: ["owner-123"], privateChannelIds: ["private-channel"], defaultWorkingDirectoryAlias: "clank", workingDirectories: { clank: "/srv/clank/app", docs: "/srv/clank/docs" } }, discord, pi, store);
   return { router, calls, sessions, sent };
 }
 
@@ -62,6 +62,18 @@ describe("superuser task router", () => {
     expect(calls.some((call) => call.startsWith("create:") || call.startsWith("thread:"))).toBe(false);
     expect(sent[0]?.content).toContain("Unknown working-directory alias 'nowhere'");
     expect(sent[1]?.content).toContain("Unknown working-directory alias 'constructor'");
+  });
+
+  it("queues a continuation that arrives while the initial task is still being persisted", async () => {
+    let releaseSave!: () => void; const saveGate = new Promise<void>((resolve) => { releaseSave = resolve; }); let saves = 0;
+    const store: TaskStore = { load: () => Promise.resolve({ version: 1, tasks: [], approvals: [] }), save: () => { saves += 1; return saves === 2 ? saveGate : Promise.resolve(); } };
+    const { router, calls } = harness(store); await router.initialize();
+    const initial = router.route(request());
+    while (saves < 2) await Promise.resolve();
+    const continuation = router.route(request({ id: "m2", channelId: "thread-1", threadId: "thread-1", content: "next" }));
+    await Promise.resolve(); releaseSave(); await Promise.all([initial, continuation]);
+    expect(calls.filter((call) => call.startsWith("prompt:"))).toEqual(["prompt:Inspect the checkout"]);
+    expect(calls).toContain("follow:next");
   });
 
   it("continues, queues by default while busy, and explicitly steers one thread only", async () => {
