@@ -27,12 +27,14 @@ class DiscordJsTransport implements DiscordTransport {
     if (!message.inGuild() || message.channel.isThread()) throw new Error("A task thread can only start from a guild text channel");
     const thread = await message.startThread({ name, autoArchiveDuration: 1440 }); return thread.id;
   }
-  async send(channelId: string, content: string, options?: { kind?: "preview" | "status" | "final"; files?: readonly string[]; approval?: { id: string; taskId: string; command: string } }): Promise<string | undefined> {
+  async send(channelId: string, content: string, options?: { kind?: "preview" | "status" | "final"; files?: readonly string[]; preservePreview?: boolean; approval?: { id: string; taskId: string; command: string } }): Promise<string | undefined> {
     const chunks = chunkDiscordMessage(content);
     if (options?.kind === "final") {
       const previews = this.#previews.get(channelId); this.#previews.delete(channelId); const preview = previews?.at(-1);
-      if (preview !== undefined && chunks.length === 1 && (options.files?.length ?? 0) === 0 && options.approval === undefined) { await preview.edit(chunks[0] ?? "Task completed without text output."); return preview.id; }
-      await preview?.delete().catch(() => undefined);
+      if (options.preservePreview !== true) {
+        if (preview !== undefined && chunks.length === 1 && (options.files?.length ?? 0) === 0 && options.approval === undefined) { await preview.edit(chunks[0] ?? "Task completed without text output."); return preview.id; }
+        await preview?.delete().catch(() => undefined);
+      }
     }
     const channel = await this.#textChannel(channelId);
     let last: Message | undefined; for (const [index, chunk] of chunks.entries()) { const finalChunk = index === chunks.length - 1; const payload: MessageCreateOptions = { content: chunk, ...(finalChunk && (options?.files?.length ?? 0) > 0 ? { files: [...(options?.files ?? [])] } : {}), ...(finalChunk && options?.approval !== undefined ? { components: [approvalButtons(options.approval.id)] } : {}) }; last = await channel.send(payload); } return last?.id;

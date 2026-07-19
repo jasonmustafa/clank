@@ -164,21 +164,22 @@ describe("durable superuser task routing", () => {
 
 describe("tool call progress", () => {
   it("starts a new editable message after eight calls", async () => {
-    const updates: { page: number; content: string }[] = [];
-    const discord: DiscordTransport = { createThread: () => Promise.resolve("thread"), send: () => Promise.resolve(undefined), updatePreview: (_channel, content, page = 0) => { updates.push({ page, content }); return Promise.resolve(); } };
-    const pi: SuperuserPiFactory = { create: () => Promise.resolve({ prompt: (_text, _images, onProgress) => { for (let index = 0; index < 9; index += 1) onProgress?.({ kind: "tool", id: String(index), name: "read", status: "started", summary: `file-${String(index)}` }); return Promise.resolve("done"); }, followUp: () => Promise.resolve(), steer: () => Promise.resolve(), stop: () => Promise.resolve(), compact: () => Promise.resolve(), status: () => ({ busy: false, queued: 0, sessionId: "session" }), dispose: () => Promise.resolve() }) };
+    const updates: { page: number; content: string }[] = []; let preserved = false;
+    const discord: DiscordTransport = { createThread: () => Promise.resolve("thread"), send: (_channel, _content, options) => { preserved = options?.preservePreview === true; return Promise.resolve(undefined); }, updatePreview: (_channel, content, page = 0) => { updates.push({ page, content }); return Promise.resolve(); } };
+    const pi: SuperuserPiFactory = { create: () => Promise.resolve({ prompt: (_text, _images, onProgress) => { for (let index = 0; index < 9; index += 1) onProgress?.({ kind: "tool", id: String(index), name: `read-${String(index)}`, status: "started" }); return Promise.resolve("done"); }, followUp: () => Promise.resolve(), steer: () => Promise.resolve(), stop: () => Promise.resolve(), compact: () => Promise.resolve(), status: () => ({ busy: false, queued: 0, sessionId: "session" }), dispose: () => Promise.resolve() }) };
     const router = new SuperuserRequestRouter({ superuserIds: ["owner-123"], privateChannelIds: ["private-channel"], defaultWorkingDirectoryAlias: "clank", workingDirectories: { clank: "/work" } }, discord, pi);
     await router.route(request());
-    expect(updates.some(({ page, content }) => page === 0 && content.includes("file-7"))).toBe(true);
-    expect(updates.some(({ page, content }) => page === 1 && content.includes("file-8") && content.endsWith("⏳ Working…"))).toBe(true);
+    expect(updates.some(({ page, content }) => page === 0 && content.includes("`read-7`"))).toBe(true);
+    expect(updates.some(({ page, content }) => page === 1 && content.includes("`read-8`") && content.endsWith("⏳ Working…"))).toBe(true);
+    expect(preserved).toBe(true);
   });
 
   it("shows tool state and a concise call summary", () => {
     expect(formatProgressPreview("Checking files", [
-      { kind: "tool", id: "1", name: "read", status: "completed", summary: "src/router.ts" },
-      { kind: "tool", id: "2", name: "bash", status: "started", summary: "npm test" },
-      { kind: "tool", id: "3", name: "edit", status: "failed", summary: "src/pi.ts" },
-    ])).toBe("✅ `read` — src/router.ts\n🔧 `bash` — npm test\n❌ `edit` — src/pi.ts\n\nChecking files\n\n⏳ Working…");
+      { kind: "tool", id: "1", name: "read", status: "completed" },
+      { kind: "tool", id: "2", name: "bash", status: "started" },
+      { kind: "tool", id: "3", name: "edit", status: "failed" },
+    ])).toBe("✅ `read`\n🔧 `bash`\n❌ `edit`\n\nChecking files\n\n⏳ Working…");
   });
 });
 
