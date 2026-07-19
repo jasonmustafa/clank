@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { TaskAttachmentBridge } from "./attachments.js";
-import { SuperuserRequestRouter, makeTaskThreadName, type DiscordRequest, type DiscordTransport, type PiProgress, type SuperuserPiFactory, type SuperuserPiSession } from "./router.js";
+import { formatProgressPreview, SuperuserRequestRouter, makeTaskThreadName, type DiscordRequest, type DiscordTransport, type PiProgress, type SuperuserPiFactory, type SuperuserPiSession } from "./router.js";
 import type { PersistedTaskState, TaskStore } from "./task-store.js";
 
 function request(overrides: Partial<DiscordRequest> = {}): DiscordRequest {
@@ -42,7 +42,7 @@ describe("superuser task router", () => {
     expect(calls[0]).toMatch(/^thread:inspect-the-checkout · [a-f0-9]{8}$/u);
     expect(calls).toContain("create:message-1:/srv/clank/app");
     expect(sent).toContainEqual({ channelId: "thread-1", content: "⏳ Working…", kind: "preview" });
-    expect(sent).toContainEqual({ channelId: "thread-1", content: "✅ Finished\n\nanswer:Inspect the checkout", kind: "final" });
+    expect(sent).toContainEqual({ channelId: "thread-1", content: "answer:Inspect the checkout\n\n✅ Finished", kind: "final" });
   });
 
   it("drops superseded preview edits before sending the final response", async () => {
@@ -51,7 +51,7 @@ describe("superuser task router", () => {
     const pi: SuperuserPiFactory = { create: () => Promise.resolve({ prompt: (_text, _images, onProgress) => { for (let index = 0; index < 100; index += 1) onProgress?.({ kind: "text", text: String(index) }); return Promise.resolve("done"); }, followUp: () => Promise.resolve(), steer: () => Promise.resolve(), stop: () => Promise.resolve(), compact: () => Promise.resolve(), status: () => ({ busy: false, queued: 0, sessionId: "session" }), dispose: () => Promise.resolve() }) };
     const router = new SuperuserRequestRouter({ superuserIds: ["owner-123"], privateChannelIds: ["private-channel"], defaultWorkingDirectoryAlias: "clank", workingDirectories: { clank: "/work" } }, discord, pi);
     const run = router.route(request()); await vi.waitFor(() => { expect(previews).toEqual(["⏳ Working…"]); }); releasePreview(); await run;
-    expect(previews).toEqual(["⏳ Working…"]); expect(finals).toEqual(["✅ Finished\n\ndone"]);
+    expect(previews).toHaveLength(2); expect(previews[0]).toBe("⏳ Working…"); expect(previews[1]).toMatch(/99\n\n⏳ Working…$/u); expect(finals).toEqual(["done\n\n✅ Finished"]);
   });
 
   it("selects a configured working directory and strips the selector from the prompt", async () => {
@@ -150,7 +150,7 @@ describe("durable superuser task routing", () => {
     expect(sent.filter((entry) => entry.content.includes("interrupted"))).toHaveLength(1);
     await router.route(request({ id: "reply", channelId: "old-thread", threadId: "old-thread", content: "continue" }));
     expect(calls).toContain("resume:old-task:/work/original:saved-session");
-    expect(sent).toContainEqual({ channelId: "old-thread", content: "✅ Finished\n\nresumed:continue", kind: "final" });
+    expect(sent).toContainEqual({ channelId: "old-thread", content: "resumed:continue\n\n✅ Finished", kind: "final" });
   });
 
   it("stops accepting work and disposes runtimes during graceful shutdown", async () => {
@@ -159,6 +159,26 @@ describe("durable superuser task routing", () => {
     await router.shutdown();
     expect(calls).toEqual(expect.arrayContaining(["stop", "dispose"]));
     await expect(router.route(request({ id: "later" }))).resolves.toEqual({ kind: "ignored" });
+  });
+});
+
+describe("tool call progress", () => {
+  it("starts a new editable message after eight calls", async () => {
+    const updates: { page: number; content: string }[] = [];
+    const discord: DiscordTransport = { createThread: () => Promise.resolve("thread"), send: () => Promise.resolve(undefined), updatePreview: (_channel, content, page = 0) => { updates.push({ page, content }); return Promise.resolve(); } };
+    const pi: SuperuserPiFactory = { create: () => Promise.resolve({ prompt: (_text, _images, onProgress) => { for (let index = 0; index < 9; index += 1) onProgress?.({ kind: "tool", id: String(index), name: "read", status: "started", summary: `file-${String(index)}` }); return Promise.resolve("done"); }, followUp: () => Promise.resolve(), steer: () => Promise.resolve(), stop: () => Promise.resolve(), compact: () => Promise.resolve(), status: () => ({ busy: false, queued: 0, sessionId: "session" }), dispose: () => Promise.resolve() }) };
+    const router = new SuperuserRequestRouter({ superuserIds: ["owner-123"], privateChannelIds: ["private-channel"], defaultWorkingDirectoryAlias: "clank", workingDirectories: { clank: "/work" } }, discord, pi);
+    await router.route(request());
+    expect(updates.some(({ page, content }) => page === 0 && content.includes("file-7"))).toBe(true);
+    expect(updates.some(({ page, content }) => page === 1 && content.includes("file-8") && content.endsWith("⏳ Working…"))).toBe(true);
+  });
+
+  it("shows tool state and a concise call summary", () => {
+    expect(formatProgressPreview("Checking files", [
+      { kind: "tool", id: "1", name: "read", status: "completed", summary: "src/router.ts" },
+      { kind: "tool", id: "2", name: "bash", status: "started", summary: "npm test" },
+      { kind: "tool", id: "3", name: "edit", status: "failed", summary: "src/pi.ts" },
+    ])).toBe("✅ `read` — src/router.ts\n🔧 `bash` — npm test\n❌ `edit` — src/pi.ts\n\nChecking files\n\n⏳ Working…");
   });
 });
 
